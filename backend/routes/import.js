@@ -1,0 +1,368 @@
+const express = require('express');
+const multer  = require('multer');
+const iconv   = require('iconv-lite');
+const { parse } = require('csv-parse/sync');
+const pool    = require('../db');
+const { getRateSek } = require('../fx');
+
+const router  = express.Router();
+const upload  = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+// ---------------------------------------------------------------------------
+// Fortnox import  (ISO-8859-1, tab-delimited)
+// ---------------------------------------------------------------------------
+router.post('/fortnox', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  try {
+    const text = iconv.decode(req.file.buffer, 'iso-8859-1');
+    const lines = text.split(/\r?\n/);
+
+    // Find header row
+    let headerIdx = lines.findIndex(l => {
+      const lower = l.toLowerCase();
+      return (lower.includes('konto') || lower.includes('account')) &&
+             (lower.includes('vernr') || lower.includes('datum') || lower.includes('debet') || lower.includes('kredit'));
+    });
+    if (headerIdx === -1) headerIdx = 0;
+
+    const headers = lines[headerIdx].split('\t').map(h => h.trim().toLowerCase()
+      .replace(/ö/g, 'o').replace(/å/g, 'a').replace(/ä/g, 'a')
+    );
+
+    const col = (aliases) => {
+      for (const a of aliases) {
+        const i = headers.findIndex(h => h.includes(a));
+        if (i !== -1) return i;
+      }
+      return -1;
+    };
+
+    const iVernr   = col(['vernr', 'ver.nr', 'ver nr', 'serie']);
+    const iDatum   = col(['bokforingsdatum', 'datum', 'date', 'bokf']);
+    const iKonto   = col(['konto']);
+    const iVerText = col(['verifikationstext', 'vertext', 'text', 'beskrivning']);
+    const iTrans   = col(['transaktionsinfo', 'trans']);
+    const iDebet   = col(['debet']);
+    const iKredit  = col(['kredit']);
+    const iProj    = col(['projekt', 'projnr', 'project', 'valuta', 'currency', 'curr']);
+
+    console.log('Fortnox header mapping:', { headers, iVernr, iDatum, iKonto, iVerText, iTrans, iDebet, iKredit, iProj });
+
+    const dataLines = lines.slice(headerIdx + 1).filter(l => l.trim());
+    const client = await pool.connect();
+    let inserted = 0, skipped = 0;
+
+    try {
+      // Fetch all VERNRs already in the DB so we can skip duplicates
+      const { rows: existingRows } = await client.query('SELECT DISTINCT vernr FROM stg_fortnox WHERE vernr IS NOT NULL');
+      const existingVernrs = new Set(existingRows.map(r => r.vernr));
+
+      await client.query('BEGIN');
+      for (const line of dataLines) {
+        const cols = line.split('\t');
+        if (cols.length < 3) { skipped++; continue; }
+        const get = (i) => i >= 0 ? (cols[i]?.trim() || null) : null;
+        const konto = get(iKonto);
+        if (!konto) { skipped++; continue; }
+        const vernr = get(iVernr);
+        if (vernr && existingVernrs.has(vernr)) { skipped++; continue; }
+        await client.query(
+          `INSERT INTO stg_fortnox (vernr, bokforingsdatum, konto, verifikationstext, transaktionsinfo, debet, kredit, project_currency)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [vernr, parseSwedishDate(get(iDatum)), konto, get(iVerText), get(iTrans),
+           parseSEK(get(iDebet)), parseSEK(get(iKredit)), get(iProj)]
+        );
+        inserted++;
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK'); throw err;
+    } finally { client.release(); }
+
+    const matched = await runAutoMatch();
+    res.json({ inserted, skipped, auto_matched: matched });
+  } catch (err) {
+    console.error('Fortnox import error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Binance import  (UTF-8 CSV)
+// Columns: UTC_Time / Time, Account, Operation, Coin, Change, Remark
+// Maps to stg_statements with source='Binance', account='1971'
+// ---------------------------------------------------------------------------
+router.post('/binance', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  try {
+    const text = req.file.buffer.toString('utf8');
+    const records = parse(text, { columns: true, skip_empty_lines: true, trim: true, bom: true });
+
+    const valueBatch = [];
+    let skipped = 0;
+
+    for (const r of records) {
+      const rawTime  = r['UTC_Time'] || r['utc_time'] || r['Time'] || r['time'] || null;
+      const date     = parseBinanceTime(rawTime);
+      const type     = r['Operation'] || r['operation'] || null;
+      const currency = r['Coin']      || r['coin']      || null;
+      const amount   = parseFloat((r['Change'] || r['change'] || '0').replace(/,/g, '')) || 0;
+      const remark   = r['Remark']    || r['remark']    || null;
+      if (!date) { skipped++; continue; }
+      valueBatch.push([date, type, currency, amount, remark]);
+    }
+
+    const client = await pool.connect();
+    const BATCH = 500;
+    let inserted = 0;
+
+    try {
+      // Find the latest timestamp already imported for this source
+      const { rows: [latestRow] } = await client.query(
+        `SELECT MAX(date) as max_date FROM stg_statements WHERE source = 'Binance' AND account = '1971'`
+      );
+      const maxDate = latestRow?.max_date ? new Date(latestRow.max_date) : null;
+
+      // For rows at exactly the boundary timestamp, build a fingerprint set to detect duplicates
+      const boundaryFingerprints = new Set();
+      if (maxDate) {
+        const { rows: boundaryRows } = await client.query(
+          `SELECT date, currency, amount FROM stg_statements WHERE source = 'Binance' AND account = '1971' AND date = $1`,
+          [maxDate]
+        );
+        for (const br of boundaryRows) {
+          boundaryFingerprints.add(`${new Date(br.date).toISOString()}|${br.currency}|${parseFloat(br.amount)}`);
+        }
+      }
+
+      await client.query('BEGIN');
+      for (let i = 0; i < valueBatch.length; i += BATCH) {
+        const chunk = valueBatch.slice(i, i + BATCH);
+        for (const row of chunk) {
+          const [date, type, currency, amount, remark] = row;
+          const rowDate = new Date(date);
+          if (maxDate) {
+            if (rowDate < maxDate) { skipped++; continue; }
+            if (rowDate.getTime() === maxDate.getTime()) {
+              const fp = `${rowDate.toISOString()}|${currency}|${amount}`;
+              if (boundaryFingerprints.has(fp)) { skipped++; continue; }
+            }
+          }
+          await client.query(
+            `INSERT INTO stg_statements (source, account, date, type, currency, amount, remark) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            ['Binance', '1971', date, type, currency, amount, remark]
+          );
+          inserted++;
+        }
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK'); throw err;
+    } finally { client.release(); }
+
+    const matched = await runAutoMatch();
+    res.json({ inserted, skipped, auto_matched: matched });
+  } catch (err) {
+    console.error('Binance import error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Kraken import  (UTF-8 CSV)
+// Columns: txid, refid, time, type, subtype, aclass, subclass, asset, wallet, amount, fee, balance
+// Only imports type = 'deposit' or 'withdrawal'
+// Net amount = amount - fee
+// Maps to stg_statements with source='Kraken', account='1966'
+// ---------------------------------------------------------------------------
+router.post('/kraken', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  try {
+    const text = req.file.buffer.toString('utf8');
+    const records = parse(text, { columns: true, skip_empty_lines: true, trim: true, bom: true });
+
+    const valueBatch = [];
+    let skipped = 0;
+
+    for (const r of records) {
+      const type = (r['type'] || '').toLowerCase();
+
+      // Only import deposit and withdrawal — trades are zero-sum, skip them
+      if (type !== 'deposit' && type !== 'withdrawal') { skipped++; continue; }
+
+      const date     = r['time'] || null;         // "YYYY-MM-DD HH:MM:SS" — Postgres handles this
+      const subtype  = r['subtype'] || null;
+      const currency = r['asset']  || null;
+      const rawAmt   = parseFloat(r['amount'] || '0') || 0;
+      const fee      = parseFloat(r['fee']    || '0') || 0;
+      const amount   = rawAmt - fee;              // net
+      const txid     = r['txid']   || null;
+
+      if (!date || !currency) { skipped++; continue; }
+
+      // [date, type, subtype, currency, amount, fee, transaction_id]
+      valueBatch.push([date, type, subtype, currency, amount, fee, txid]);
+    }
+
+    const client = await pool.connect();
+    let inserted = 0;
+
+    try {
+      // Pre-load all existing Kraken transaction_ids to skip duplicates
+      const { rows: existingTxRows } = await client.query(
+        `SELECT transaction_id FROM stg_statements WHERE source = 'Kraken' AND transaction_id IS NOT NULL`
+      );
+      const existingTxIds = new Set(existingTxRows.map(r => r.transaction_id));
+
+      await client.query('BEGIN');
+      for (const row of valueBatch) {
+        const [date, type, subtype, currency, amount, fee, txid] = row;
+        if (txid && existingTxIds.has(txid)) { skipped++; continue; }
+        await client.query(
+          `INSERT INTO stg_statements (source, account, date, type, subtype, currency, amount, fee, transaction_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          ['Kraken', '1966', date, type, subtype, currency, amount, fee, txid]
+        );
+        inserted++;
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK'); throw err;
+    } finally { client.release(); }
+
+    const matched = await runAutoMatch('1966');
+    res.json({ inserted, skipped, auto_matched: matched });
+  } catch (err) {
+    console.error('Kraken import error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Auto-matching
+// Matches unmatched Fortnox kredit lines for a given konto against unmatched
+// statement rows for the same account, using FX conversion to SEK.
+// ---------------------------------------------------------------------------
+async function runAutoMatch(account = '1971') {
+  const konto = account; // Fortnox konto matches the account field
+  const client = await pool.connect();
+  let matchCount = 0;
+
+  try {
+    await client.query('BEGIN');
+
+    const { rows: fnRows } = await client.query(`
+      SELECT f.id, f.bokforingsdatum, f.kredit, f.vernr
+      FROM stg_fortnox f
+      WHERE f.konto = $1
+        AND f.kredit > 0
+        AND NOT EXISTS (SELECT 1 FROM recon_matches m WHERE m.fortnox_id = f.id)
+      ORDER BY f.bokforingsdatum
+    `, [konto]);
+
+    for (const fn of fnRows) {
+      const dateStr = fn.bokforingsdatum instanceof Date
+        ? fn.bokforingsdatum.toISOString().slice(0, 10)
+        : String(fn.bokforingsdatum).slice(0, 10);
+      const fnSek = parseFloat(fn.kredit);
+
+      const { rows: stRows } = await client.query(`
+        SELECT s.id, s.amount, s.currency, s.date
+        FROM stg_statements s
+        WHERE s.account = $1
+          AND DATE(s.date) = $2::date
+          AND NOT EXISTS (SELECT 1 FROM recon_matches m WHERE m.statement_id = s.id)
+        ORDER BY s.currency, s.date
+      `, [account, dateStr]);
+
+      if (stRows.length === 0) continue;
+
+      // Group by currency
+      const byCurrency = {};
+      for (const st of stRows) {
+        (byCurrency[st.currency] = byCurrency[st.currency] || []).push(st);
+      }
+
+      let matched = false;
+      for (const [currency, rows] of Object.entries(byCurrency)) {
+        if (matched) break;
+        const fxRate = await getRateSek(currency, dateStr);
+        if (!fxRate) continue;
+
+        // Try individual row match (within 2%)
+        for (const st of rows) {
+          const stSek = Math.abs(parseFloat(st.amount)) * fxRate;
+          const diff  = Math.abs(fnSek - stSek) / fnSek;
+          if (diff <= 0.02) {
+            await client.query(`
+              INSERT INTO recon_matches (fortnox_id, statement_id, match_type, fx_rate_used, notes, matched_by)
+              VALUES ($1,$2,'auto',$3,$4,'system')
+            `, [fn.id, st.id, fxRate.toFixed(6),
+                `Auto: ${Math.abs(parseFloat(st.amount)).toFixed(4)} ${currency} × ${fxRate.toFixed(4)} = ${stSek.toFixed(2)} SEK vs ${fnSek.toFixed(2)} (${(diff*100).toFixed(2)}%)`]);
+            matchCount++;
+            matched = true;
+            break;
+          }
+        }
+
+        // Try sum of same-currency rows for the day (within 2%)
+        if (!matched) {
+          const sumSek = rows.reduce((s, r) => s + Math.abs(parseFloat(r.amount)) * fxRate, 0);
+          const diff   = Math.abs(fnSek - sumSek) / fnSek;
+          if (diff <= 0.02) {
+            for (const st of rows) {
+              await client.query(`
+                INSERT INTO recon_matches (fortnox_id, statement_id, match_type, fx_rate_used, notes, matched_by)
+                VALUES ($1,$2,'auto',$3,$4,'system')
+              `, [fn.id, st.id, fxRate.toFixed(6),
+                  `Auto (sum ${rows.length}): Σ ${sumSek.toFixed(2)} SEK vs ${fnSek.toFixed(2)} (${(diff*100).toFixed(2)}%)`]);
+              matchCount++;
+            }
+            matched = true;
+          }
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Auto-match error:', err);
+  } finally {
+    client.release();
+  }
+
+  return matchCount;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function parseBinanceTime(s) {
+  if (!s) return null;
+  s = s.trim();
+  // Binance 2-digit year: "25-12-31 02:01:04"
+  if (/^\d{2}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    return '20' + s.replace(' ', 'T') + 'Z';
+  }
+  return s;
+}
+
+function parseSwedishDate(s) {
+  if (!s) return null;
+  const clean = s.replace(/[^\d-]/g, '');
+  if (/^\d{8}$/.test(clean)) {
+    return `${clean.slice(0,4)}-${clean.slice(4,6)}-${clean.slice(6,8)}`;
+  }
+  return clean || null;
+}
+
+function parseSEK(s) {
+  if (!s || s.trim() === '') return 0;
+  return parseFloat(s.trim().replace(/\s/g, '').replace(',', '.')) || 0;
+}
+
+module.exports = router;

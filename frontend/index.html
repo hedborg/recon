@@ -1,0 +1,2045 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recon — Fortnox ↔ Statements</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  /* ── Theme variables ─────────────────────────────────────────── */
+  [data-theme="dark"] {
+    --bg: #0f1117;
+    --bg-panel: #0f1117;
+    --bg-header: #1a1d27;
+    --bg-table-head: #141620;
+    --bg-input: #1f2937;
+    --bg-row-hover: #1e2235;
+    --bg-row-selected: #2e1f5e;
+    --bg-row-proposed: #1a2e1a;
+    --bg-proposal-bar: #0c1929;
+    --bg-match-side: #111827;
+    --bg-stmt-filters: #0f1623;
+    --bg-chart-card: #1a1d27;
+    --bg-cov-card: #141620;
+    --border: #374151;
+    --border-panel: #2d3148;
+    --text: #d1d5db;
+    --text-muted: #4b5563;
+    --text-header: #e2e8f0;
+    --text-th: #6b7280;
+    --text-td: #cbd5e1;
+    --text-date: #7dd3fc;
+    --text-num: #86efac;
+    --text-debet: #fca5a5;
+    --text-accent: #a78bfa;
+    --text-stat-strong: #a78bfa;
+    --text-import-status: #34d399;
+    --text-proposal-desc: #7dd3fc;
+    --text-total-sek: #fbbf24;
+    --scrollbar-thumb: #2d3148;
+    --toast-bg: #1f2937;
+    --color-scheme: dark;
+  }
+
+  [data-theme="light"] {
+    --bg: #f8f9fa;
+    --bg-panel: #ffffff;
+    --bg-header: #f1f3f5;
+    --bg-table-head: #e9ecef;
+    --bg-input: #ffffff;
+    --bg-row-hover: #f1f3f5;
+    --bg-row-selected: #e0d7ff;
+    --bg-row-proposed: #d1fae5;
+    --bg-proposal-bar: #e8f4fd;
+    --bg-match-side: #f8f9fa;
+    --bg-stmt-filters: #f1f3f5;
+    --bg-chart-card: #ffffff;
+    --bg-cov-card: #f8f9fa;
+    --border: #dee2e6;
+    --border-panel: #dee2e6;
+    --text: #212529;
+    --text-muted: #6c757d;
+    --text-header: #343a40;
+    --text-th: #495057;
+    --text-td: #212529;
+    --text-date: #0369a1;
+    --text-num: #166534;
+    --text-debet: #991b1b;
+    --text-accent: #6d28d9;
+    --text-stat-strong: #6d28d9;
+    --text-import-status: #166534;
+    --text-proposal-desc: #0369a1;
+    --text-total-sek: #92400e;
+    --scrollbar-thumb: #ced4da;
+    --toast-bg: #ffffff;
+    --color-scheme: light;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ─────────────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 16px;
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border-panel);
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 15px; font-weight: 600; color: var(--text-header); }
+  .stats-bar { display: flex; gap: 16px; margin-left: auto; align-items: center; }
+  .stat { font-size: 11px; color: var(--text-muted); }
+  .stat strong { color: var(--text-stat-strong); }
+
+  .import-area { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .import-area label {
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-muted);
+    font-size: 11px;
+    transition: border-color .15s, color .15s;
+  }
+  .import-area label:hover { border-color: #6366f1; color: var(--text-header); }
+  .import-area input[type=file] { display: none; }
+  #import-status { font-size: 11px; color: var(--text-import-status); min-width: 160px; }
+
+  /* ── Account switcher ───────────────────────────────────────────── */
+  .account-switcher { display: flex; gap: 4px; align-items: center; }
+  .acct-btn {
+    padding: 4px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-th);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .acct-btn.active { border-color: var(--text-accent); color: var(--text-accent); background: #2d1f5e; }
+  .acct-btn:hover:not(.active) { border-color: #6366f1; color: var(--text-header); }
+
+  /* ── Main layout ─────────────────────────────────────────────── */
+  .main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    gap: 0;
+  }
+
+  .top-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex: 1;
+    overflow: hidden;
+    border-bottom: 2px solid var(--border-panel);
+  }
+
+  /* ── Panel ───────────────────────────────────────────────────── */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid var(--border-panel);
+  }
+  .panel:last-child { border-right: none; }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border-panel);
+    flex-shrink: 0;
+  }
+  .panel-header h2 { font-size: 12px; font-weight: 600; color: var(--text-accent); text-transform: uppercase; letter-spacing: .05em; }
+  .badge {
+    font-size: 10px;
+    background: var(--border-panel);
+    color: var(--text-muted);
+    padding: 1px 6px;
+    border-radius: 99px;
+  }
+
+  .table-wrap {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-table-head);
+    color: var(--text-th);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 5px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-panel);
+    white-space: nowrap;
+    z-index: 1;
+  }
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background .1s;
+  }
+  tbody tr:hover { background: var(--bg-row-hover); }
+  tbody tr.selected { background: var(--bg-row-selected) !important; }
+  tbody tr.proposed { background: var(--bg-row-proposed) !important; }
+  td {
+    padding: 4px 8px;
+    vertical-align: top;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-td);
+  }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-num); }
+  td.num.debet { color: var(--text-debet); }
+  td.date { color: var(--text-date); }
+  td.muted { color: var(--text-muted); }
+
+  /* ── Match proposal bar ──────────────────────────────────────── */
+  #proposal-bar {
+    flex-shrink: 0;
+    background: var(--bg-proposal-bar);
+    border-top: 1px solid var(--border-panel);
+    border-bottom: 1px solid var(--border-panel);
+    padding: 6px 12px;
+    display: none;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+  }
+  #proposal-bar.visible { display: flex; }
+  #proposal-desc { flex: 1; color: var(--text-proposal-desc); }
+  #proposal-rate { color: #fbbf24; font-weight: 600; }
+  #proposal-notes {
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-header);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    width: 260px;
+  }
+  .btn {
+    padding: 4px 12px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: opacity .15s;
+  }
+  .btn:hover { opacity: .85; }
+  .btn-confirm { background: #4ade80; color: #052e16; }
+  .btn-explain { background: #fb923c; color: #1c0a00; }
+  .btn-cancel  { background: var(--border); color: var(--text); }
+
+  /* ── Matches panel (bottom) ──────────────────────────────────── */
+  .bottom-panel {
+    height: 220px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .match-type-auto    { color: #34d399; }
+  .match-type-manual  { color: #60a5fa; }
+  .match-type-explained { color: #fb923c; }
+
+  /* ── Matched rows (show-all mode) ───────────────────────────── */
+  tr.matched-row td { opacity: 0.45; }
+  tr.matched-row:hover td { opacity: 0.75; cursor: pointer; }
+  tr.matched-row td:first-child { border-left: 2px solid #22c55e; }
+  tr.matched-row.selected td { opacity: 1; }
+
+  /* ── Show-all toggle button ──────────────────────────────────── */
+  #btn-show-all { transition: background 0.15s; }
+  #btn-show-all.active { background:#1a3a1a; border-color:#22c55e; color:#4ade80; }
+
+  /* ── Match detail panel ──────────────────────────────────────── */
+  #detail-panel { min-height: 80px; }
+  .detail-empty { padding: 16px; color: var(--text-muted); font-size: 12px; }
+  .match-detail-card {
+    padding: 12px 16px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .match-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 11px;
+    color: var(--text-th);
+  }
+  .match-detail-sides {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+  }
+  .match-side {
+    flex: 1;
+    background: var(--bg-match-side);
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+  .match-side-label {
+    font-size: 10px;
+    color: var(--text-th);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+  }
+  .match-side-amount { font-size: 13px; margin-top: 4px; }
+  .match-arrow { color: #6366f1; font-size: 18px; align-self: center; padding: 0 4px; }
+  .match-detail-footer { font-size: 11px; color: var(--text-th); margin-top: 6px; }
+
+  /* ── Inline editable cells ───────────────────────────────────── */
+  .acct-select, .voucher-input {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-header);
+    font-size: 11px;
+    border-radius: 3px;
+    padding: 1px 4px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .acct-select:hover, .acct-select:focus,
+  .voucher-input:hover, .voucher-input:focus {
+    border-color: var(--text-muted);
+    background: var(--bg-input);
+    outline: none;
+  }
+  .acct-select { cursor: pointer; }
+  .voucher-input::placeholder { color: var(--border); }
+
+  @keyframes flash-ok  { 0%,100% { background: transparent; } 40% { background: #14532d; } }
+  @keyframes flash-err { 0%,100% { background: transparent; } 40% { background: #7f1d1d; } }
+  td.save-ok  { animation: flash-ok  0.9s ease; }
+  td.save-err { animation: flash-err 0.9s ease; }
+
+  .unmatch-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 0 4px;
+  }
+  .unmatch-btn:hover { color: #f87171; }
+
+  /* ── Panel SEK totals ───────────────────────────────────────── */
+  .total-sek {
+    font-size: 11px;
+    margin-left: 8px;
+    color: var(--text-total-sek);
+    font-variant-numeric: tabular-nums;
+  }
+  .total-sek::before { content: 'Σ '; color: var(--text-th); }
+
+  /* ── Sortable headers ───────────────────────────────────────── */
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--text-accent); }
+  th.sortable.asc  .sort-icon::after { content: ' ▲'; color: var(--text-accent); }
+  th.sortable.desc .sort-icon::after { content: ' ▼'; color: var(--text-accent); }
+  th.sortable .sort-icon { font-size: 9px; color: var(--text-muted); }
+  th.sortable.asc  .sort-icon,
+  th.sortable.desc .sort-icon { color: transparent; }
+
+  /* ── Filter bar ─────────────────────────────────────────────── */
+  .filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-left: 8px;
+  }
+  .filter-bar input[type=date],
+  .filter-bar input[type=number] {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-header);
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    color-scheme: var(--color-scheme);
+  }
+  .filter-bar input[type=number] { width: 80px; }
+  .filter-sep { color: var(--text-muted); }
+
+  /* ── Statement-side filters ──────────────────────────────────── */
+  .stmt-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-stmt-filters);
+  }
+  .stmt-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .sf-label {
+    font-size: 11px;
+    color: var(--text-th);
+    min-width: 52px;
+  }
+  .sf-select {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-header);
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .sf-num {
+    width: 90px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-header);
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+  .btn-filter {
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .btn-filter:hover { border-color: #6366f1; color: var(--text-header); }
+
+  /* ── Tab navigation ─────────────────────────────────────────── */
+  .tab-bar {
+    display: flex;
+    gap: 2px;
+    padding: 0 16px;
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border-panel);
+    flex-shrink: 0;
+  }
+  .tab-btn {
+    padding: 6px 16px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-th);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+    margin-bottom: -1px;
+  }
+  .tab-btn:hover { color: var(--text-accent); }
+  .tab-btn.active { color: var(--text-accent); border-bottom-color: var(--text-accent); }
+
+  .tab-content { display: none !important; }
+  .tab-content.active { display: flex !important; }
+  #tab-recon { flex: 1; flex-direction: column; overflow: hidden; }
+  #tab-fx    { flex: 1; overflow-y: auto; flex-direction: column; gap: 18px; padding: 16px; background: var(--bg); }
+
+  /* ── FX Rates view ───────────────────────────────────────────── */
+  #fx-view {
+    overflow-y: auto;
+    padding: 16px;
+    gap: 20px;
+    flex-direction: column;
+    background: var(--bg);
+  }
+
+  .fx-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .fx-toolbar label { font-size: 11px; color: var(--text-th); }
+  .coin-toggles { display: flex; gap: 6px; flex-wrap: wrap; }
+  .coin-toggle {
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: opacity .15s, border-color .15s;
+    opacity: 0.45;
+  }
+  .coin-toggle.on { opacity: 1; }
+
+  .chart-card {
+    background: var(--bg-chart-card);
+    border: 1px solid var(--border-panel);
+    border-radius: 8px;
+    padding: 16px;
+    flex-shrink: 0;
+  }
+  .chart-card h3 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    margin-bottom: 10px;
+  }
+
+  .coverage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+  }
+  .cov-card {
+    background: var(--bg-cov-card);
+    border: 1px solid var(--border-panel);
+    border-radius: 6px;
+    padding: 10px 14px;
+  }
+  .cov-coin { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .cov-bar-wrap {
+    height: 5px;
+    background: var(--border-panel);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 6px 0;
+  }
+  .cov-bar { height: 100%; border-radius: 3px; transition: width .4s; }
+  .cov-label { font-size: 10px; color: var(--text-th); }
+  .cov-pct { font-size: 11px; font-weight: 600; }
+
+  /* ── Scrollbars ──────────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+  /* ── Toast ───────────────────────────────────────────────────── */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    background: var(--toast-bg);
+    color: var(--text-header);
+    border: 1px solid var(--border);
+    opacity: 0;
+    transition: opacity .2s;
+    pointer-events: none;
+    z-index: 999;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Fortnox ↔ Statements Reconciliation</h1>
+
+  <div class="import-area">
+    <label title="ISO-8859-1 tab-delimited XLS export from Fortnox">
+      Import Fortnox
+      <input type="file" id="fn-file" accept=".xls,.txt,.tsv,.csv">
+    </label>
+    <label title="UTF-8 CSV export from Binance (account 1971)">
+      Import Binance
+      <input type="file" id="bn-file" accept=".csv">
+    </label>
+    <label title="UTF-8 CSV export from Kraken (account 1966)">
+      Import Kraken
+      <input type="file" id="kr-file" accept=".csv">
+    </label>
+    <span id="import-status"></span>
+  </div>
+
+  <div class="account-switcher" id="account-switcher" style="margin-left:8px">
+    <!-- populated by JS once /api/accounts is loaded -->
+  </div>
+
+  <div class="filter-bar">
+    <span style="color:var(--text-th);font-size:11px">Dates:</span>
+    <input type="date" id="filter-from" title="From date">
+    <span class="filter-sep">–</span>
+    <input type="date" id="filter-to" title="To date">
+    <button class="btn-filter" id="btn-apply-filter">Apply</button>
+    <button class="btn-filter" id="btn-clear-filter">Clear</button>
+  </div>
+
+  <div class="stats-bar">
+    <span class="stat" id="stat-fn-wrap">Fortnox: <strong id="stat-fn">—</strong></span>
+    <span class="stat" id="stat-st-wrap">Statements: <strong id="stat-st">—</strong></span>
+    <span class="stat">Matches: <strong id="stat-mx">—</strong></span>
+    <button class="btn-filter" id="btn-show-all" title="Toggle between unmatched-only and all rows">Unmatched only</button>
+    <button class="btn-filter" id="btn-refresh-fx" title="Fetch missing FX rates">↻ Refresh FX</button>
+    <span id="fx-status" style="font-size:11px;color:var(--text-date);min-width:140px;"></span>
+  </div>
+  <button class="btn-filter" id="btn-theme" title="Toggle light/dark theme">☀ Light</button>
+</header>
+
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="recon">📊 Reconciliation</button>
+  <button class="tab-btn"        data-tab="fx">📈 FX Rates</button>
+</div>
+
+<div class="main">
+
+<!-- ═══════════════════════ FX RATES TAB ══════════════════════════ -->
+<div class="tab-content" id="tab-fx">
+
+  <!-- Toolbar -->
+  <div class="fx-toolbar">
+    <label>Toggle coins:</label>
+    <div class="coin-toggles" id="coin-toggles"></div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+      <label style="color:var(--text-th);font-size:11px">Scale:</label>
+      <select id="fx-scale" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:11px;">
+        <option value="logarithmic">Logarithmic</option>
+        <option value="linear">Linear</option>
+      </select>
+      <button class="btn-filter" id="btn-fx-reload">↻ Reload</button>
+    </div>
+  </div>
+
+  <!-- Main chart -->
+  <div class="chart-card">
+    <h3>Rate vs SEK — all coins</h3>
+    <div style="position:relative;height:360px;">
+      <canvas id="fx-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Coverage grid -->
+  <div class="chart-card">
+    <h3>Coverage — dates with stored rate</h3>
+    <div class="coverage-grid" id="cov-grid"></div>
+  </div>
+
+  <!-- Stablecoins separate chart -->
+  <div class="chart-card" id="stable-card">
+    <h3>Stablecoins (USD pegged) vs SEK</h3>
+    <div style="position:relative;height:200px;">
+      <canvas id="stable-chart"></canvas>
+    </div>
+  </div>
+
+</div>
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<div class="tab-content active" id="tab-recon" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+  <div class="top-panels">
+    <!-- Left: Fortnox -->
+    <div class="panel" id="panel-fortnox">
+      <div class="panel-header">
+        <h2 id="fn-panel-title">Unmatched Fortnox</h2>
+        <span class="badge" id="fn-count">0</span>
+        <span class="total-sek" id="fn-total"></span>
+        <button class="btn-filter" id="btn-automatch"
+                style="margin-left:10px;border-color:var(--text-accent);color:var(--text-accent);"
+                title="Auto-match all rows where the smart filter yields exactly 1 result">
+          ⚡ Auto-match All
+        </button>
+        <span id="automatch-status" style="font-size:11px;color:var(--text-accent);margin-left:6px;"></span>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Click rows to select</span>
+      </div>
+      <div class="table-wrap">
+        <table id="fn-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-col="vernr" data-table="fn" id="th-fn-vernr">Vernr <span class="sort-icon">↕</span></th>
+              <th class="sortable" data-col="date" data-table="fn" id="th-fn-date">Date <span class="sort-icon">↕</span></th>
+              <th>Text</th>
+              <th>Transinfo</th>
+              <th>Debet</th>
+              <th>Kredit</th>
+              <th>Curr</th>
+            </tr>
+          </thead>
+          <tbody id="fn-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Right: Statements -->
+    <div class="panel" id="panel-binance">
+      <div class="panel-header">
+        <h2 id="bn-panel-title">Unmatched Statements</h2>
+        <span class="badge" id="bn-count">0</span>
+        <span class="total-sek" id="bn-total"></span>
+        <span id="smart-filter-tag" style="display:none;margin-left:8px;font-size:10px;background:var(--bg-proposal-bar);color:var(--text-date);padding:2px 7px;border-radius:99px;cursor:pointer;" title="Click to clear smart filter">
+          <span id="sf-icon">⚡</span> <span id="sf-desc"></span> ✕
+        </span>
+        <button class="btn-filter" id="btn-select-all-stmt" style="margin-left:auto" title="Select / deselect all visible statement rows">Select All</button>
+        <button class="btn-filter" id="btn-export-stmt" style="margin-left:4px" title="Export filtered rows to Excel">↓ Export</button>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Click rows to select</span>
+      </div>
+
+      <!-- Statement-side filters -->
+      <div class="stmt-filters">
+        <div class="stmt-filter-row">
+          <span class="sf-label">Type</span>
+          <select id="sf-type" class="sf-select">
+            <option value="">All</option>
+          </select>
+          <span class="sf-label" style="margin-left:8px">Currency</span>
+          <select id="sf-currency" class="sf-select">
+            <option value="">All</option>
+          </select>
+          <button class="btn-filter" id="btn-clear-stmt-filters" style="margin-left:auto">Clear</button>
+        </div>
+        <div class="stmt-filter-row">
+          <span class="sf-label">Amount</span>
+          <input type="number" id="sf-amt-from" class="sf-num" placeholder="min">
+          <span class="filter-sep">–</span>
+          <input type="number" id="sf-amt-to"   class="sf-num" placeholder="max">
+        </div>
+        <div class="stmt-filter-row">
+          <span class="sf-label">SEK</span>
+          <input type="number" id="sf-sek-from" class="sf-num" placeholder="min">
+          <span class="filter-sep">–</span>
+          <input type="number" id="sf-sek-to"   class="sf-num" placeholder="max">
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="bn-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-col="date"     data-table="bn" id="th-bn-time">Date <span class="sort-icon">↕</span></th>
+              <th class="sortable" data-col="type"     data-table="bn">Type <span class="sort-icon">↕</span></th>
+              <th class="sortable" data-col="currency" data-table="bn">Currency <span class="sort-icon">↕</span></th>
+              <th class="sortable" data-col="amount"   data-table="bn" id="th-change">Amount <span class="sort-icon">↕</span></th>
+              <th class="sortable" data-col="sek"      data-table="bn" id="th-sek">≈ SEK <span class="sort-icon">↕</span></th>
+              <th class="sortable" data-col="remark"   data-table="bn">Remark <span class="sort-icon">↕</span></th>
+              <th style="min-width:130px">Contra Acct</th>
+              <th style="min-width:160px">Voucher Text</th>
+            </tr>
+          </thead>
+          <tbody id="bn-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Proposal bar -->
+  <div id="proposal-bar">
+    <span id="proposal-desc"></span>
+    <span id="proposal-rate"></span>
+    <input type="text" id="proposal-notes" placeholder="Notes (optional)">
+    <button class="btn btn-confirm" id="btn-confirm">Confirm Match</button>
+    <button class="btn btn-explain" id="btn-explain-fn">Mark Fortnox as Explained</button>
+    <button class="btn btn-explain" id="btn-explain-bn" style="display:none">Mark Binance as Explained</button>
+    <button class="btn btn-cancel"  id="btn-cancel">Cancel</button>
+  </div>
+
+  <!-- Bottom: Match Detail -->
+  <div class="bottom-panel panel" id="detail-panel">
+    <div class="panel-header">
+      <h2>Match Detail</h2>
+      <span class="badge" id="mx-count">0</span>
+      <span style="font-size:11px;color:var(--text-muted);margin-left:6px">matched</span>
+      <span style="margin-left:auto;font-size:11px;color:var(--text-muted)" id="detail-hint">Click a matched row to inspect</span>
+    </div>
+    <div id="detail-content">
+      <div class="detail-empty">Click any matched row (✓) on either side to view match details here.</div>
+    </div>
+  </div>
+</div><!-- end tab-recon -->
+</div><!-- end .main -->
+
+<div id="toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────
+let selectedFns   = new Map();
+let selectedBns   = new Map();
+function prevMonthRange() {
+  const now   = new Date();
+  const year  = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+  const month = now.getMonth() === 0 ? 12 : now.getMonth(); // 1-based previous month
+  const last  = new Date(year, month, 0).getDate();
+  const mm    = String(month).padStart(2, '0');
+  return { from: `${year}-${mm}-01`, to: `${year}-${mm}-${last}` };
+}
+const _initRange  = prevMonthRange();
+let filterFrom    = _initRange.from;
+let filterTo      = _initRange.to;
+let fxRates       = {};
+let filteredStRows = [];
+let bnSort        = { col: 'date', dir: 'desc' };
+let fnSort        = { col: 'date', dir: 'desc' };
+let showAll          = false;
+let linkedFilter     = null;
+let chartOfAccounts  = [];       // [{ account_number, account_name }, ...]
+let bnRows        = [];
+let fnRows        = [];
+let smartFilter   = null;
+let activeAccount = '1971';   // currently selected account (Fortnox konto)
+
+// ── Boot ─────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  // Pre-fill date inputs with last month's range
+  document.getElementById('filter-from').value = filterFrom;
+  document.getElementById('filter-to').value   = filterTo;
+
+  updateShowAllUI();
+  refresh();
+  loadAccountSwitcher();
+  setupImport('fn-file', '/import/fortnox');
+  setupImport('bn-file', '/import/binance');
+  setupImport('kr-file', '/import/kraken');
+  document.getElementById('btn-confirm').addEventListener('click', confirmMatch);
+  document.getElementById('btn-explain-fn').addEventListener('click', explainFortnox);
+  document.getElementById('btn-explain-bn').addEventListener('click', explainBinance);
+  document.getElementById('btn-cancel').addEventListener('click', clearSelection);
+  document.getElementById('btn-export-stmt').addEventListener('click', exportStatements);
+  document.getElementById('btn-select-all-stmt').addEventListener('click', selectAllStatements);
+
+  document.getElementById('btn-apply-filter').addEventListener('click', () => {
+    filterFrom = document.getElementById('filter-from').value;
+    filterTo   = document.getElementById('filter-to').value;
+    refresh();
+  });
+  document.getElementById('btn-clear-filter').addEventListener('click', () => {
+    filterFrom = ''; filterTo = '';
+    document.getElementById('filter-from').value = '';
+    document.getElementById('filter-to').value   = '';
+    refresh();
+  });
+  ['filter-from','filter-to'].forEach(id =>
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('btn-apply-filter').click();
+    })
+  );
+
+  // Statement-panel filters — instant, client-side only
+  ['sf-type','sf-currency'].forEach(id =>
+    document.getElementById(id).addEventListener('change', () => renderStatements(bnRows))
+  );
+  ['sf-amt-from','sf-amt-to','sf-sek-from','sf-sek-to'].forEach(id =>
+    document.getElementById(id).addEventListener('input', () => renderStatements(bnRows))
+  );
+  document.getElementById('btn-clear-stmt-filters').addEventListener('click', () => {
+    ['sf-type','sf-currency'].forEach(id => document.getElementById(id).selectedIndex = 0);
+    ['sf-amt-from','sf-amt-to','sf-sek-from','sf-sek-to'].forEach(id => document.getElementById(id).value = '');
+    renderStatements(bnRows);
+  });
+
+  // Populate dropdowns from DB
+  loadOperations();
+  loadCurrencies();
+  loadChartOfAccounts();
+
+  // Column sort for both tables
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col   = th.dataset.col;
+      const table = th.dataset.table;
+      const state = table === 'fn' ? fnSort : bnSort;
+
+      if (state.col === col) {
+        state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.col = col;
+        state.dir = 'desc';
+      }
+
+      const tableId = table === 'fn' ? '#fn-table' : '#bn-table';
+      document.querySelectorAll(`${tableId} th.sortable`).forEach(t => t.classList.remove('asc','desc'));
+      th.classList.add(state.dir);
+
+      if (table === 'fn') renderFortnox(fnRows);
+      else                renderStatements(bnRows);
+    });
+  });
+
+  // Set initial sort indicator arrows
+  document.getElementById('th-fn-date').classList.add('desc');
+  document.getElementById('th-bn-time').classList.add('desc');
+
+  // Auto-match button
+  document.getElementById('btn-automatch').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-automatch');
+    const status = document.getElementById('automatch-status');
+    const sfType     = document.getElementById('sf-type')?.value     || '';
+    const sfCurrency = document.getElementById('sf-currency')?.value || '';
+    const activeFilters = [
+      filterFrom   && 'from '      + filterFrom,
+      filterTo     && 'to '        + filterTo,
+      sfType       && 'type: '     + sfType,
+      sfCurrency   && 'currency: ' + sfCurrency,
+    ].filter(Boolean);
+    const scopeDesc = activeFilters.length
+      ? `\n\nActive filters: ${activeFilters.join(', ')}`
+      : '\n\nNo filters active — will process entire dataset.';
+    if (!confirm(`Run auto-match for account ${activeAccount}?${scopeDesc}\n\nWill match Fortnox rows where the smart filter yields exactly 1 result (exact text match, or ±10% SEK within ±2 days).`)) return;
+    btn.disabled = true;
+    status.textContent = 'Running…';
+    try {
+      const r = await fetch('/api/automatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account: activeAccount,
+          from: filterFrom || undefined,
+          to:   filterTo   || undefined,
+          op:   document.getElementById('sf-type')?.value || undefined,
+        }),
+      }).then(r => r.json());
+      if (r.error) throw new Error(r.error);
+      status.textContent = `✓ ${r.matched} matched (${r.exact} exact, ${r.range} range), ${r.skipped} skipped`;
+      toast(`Auto-matched ${r.matched} rows`);
+      refresh();
+    } catch(e) {
+      status.textContent = `✗ ${e.message}`;
+    }
+    btn.disabled = false;
+    setTimeout(() => { status.textContent = ''; }, 8000);
+  });
+
+  // Show-all toggle
+  document.getElementById('btn-show-all').addEventListener('click', () => {
+    showAll = !showAll;
+    updateShowAllUI();
+    clearSelection();
+    refresh();
+  });
+
+  // Refresh FX button
+  document.getElementById('btn-refresh-fx').addEventListener('click', async () => {
+    document.getElementById('btn-refresh-fx').disabled = true;
+    const state = await fetch('/api/fx-rates/refresh', { method: 'POST' }).then(r => r.json());
+    if (state.total === 0) {
+      setFxStatus('✓ All rates up to date', false);
+      document.getElementById('btn-refresh-fx').disabled = false;
+    } else {
+      setFxStatus(`Fetching 0 / ${state.total}…`, true);
+      pollFxStatus(state.total);
+    }
+  });
+
+  // Smart filter tag — click to clear
+  document.getElementById('smart-filter-tag').addEventListener('click', () => {
+    smartFilter = null;
+    document.getElementById('smart-filter-tag').style.display = 'none';
+    renderStatements(bnRows);
+    renderTotals(fnRows, bnRows);
+  });
+});
+
+// ── Import ────────────────────────────────────────────────────────
+function setupImport(inputId, endpoint) {
+  document.getElementById(inputId).addEventListener('change', async function () {
+    const file = this.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    setStatus(`Uploading ${file.name}…`);
+    try {
+      const r = await fetch(endpoint, { method: 'POST', body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      setStatus(`✓ ${j.inserted} rows imported, ${j.auto_matched} auto-matched`);
+      refresh();
+    } catch (e) {
+      setStatus(`✗ ${e.message}`, true);
+    }
+    this.value = '';
+  });
+}
+
+function setStatus(msg, err = false) {
+  const el = document.getElementById('import-status');
+  el.textContent = msg;
+  el.style.color = err ? '#f87171' : '#34d399';
+  setTimeout(() => { el.textContent = ''; }, 6000);
+}
+
+// ── Data loading ──────────────────────────────────────────────────
+function filterParams(extra = {}) {
+  const p = new URLSearchParams();
+  if (filterFrom) p.set('from', filterFrom);
+  if (filterTo)   p.set('to',   filterTo);
+  for (const [k, v] of Object.entries(extra)) if (v) p.set(k, v);
+  return p.toString() ? '?' + p.toString() : '';
+}
+
+async function loadAccountSwitcher() {
+  try {
+    const accounts = await fetch('/api/accounts').then(r => r.json());
+    const sw = document.getElementById('account-switcher');
+    if (!accounts.length) { sw.style.display = 'none'; return; }
+
+    // Ensure activeAccount is valid
+    if (!accounts.find(a => a.account === activeAccount)) {
+      activeAccount = accounts[0].account;
+    }
+
+    sw.innerHTML = accounts.map(a =>
+      `<button class="acct-btn${a.account === activeAccount ? ' active' : ''}"
+               data-account="${a.account}"
+               title="${esc(a.source)} — Fortnox konto ${a.account}">
+         ${esc(a.source)} ${a.account}
+       </button>`
+    ).join('');
+
+    sw.querySelectorAll('.acct-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeAccount = btn.dataset.account;
+        sw.querySelectorAll('.acct-btn').forEach(b => b.classList.toggle('active', b === btn));
+        ['sf-type','sf-currency'].forEach(id => document.getElementById(id).selectedIndex = 0);
+        ['sf-amt-from','sf-amt-to','sf-sek-from','sf-sek-to'].forEach(id => document.getElementById(id).value = '');
+        loadOperations();
+        loadCurrencies();
+        clearSelection();
+        refresh();
+      });
+    });
+  } catch(_) {}
+}
+
+async function loadOperations() {
+  try {
+    const ops = await fetch(`/api/statements/operations?account=${activeAccount}`).then(r => r.json());
+    const sel = document.getElementById('sf-type');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All</option>' +
+      ops.map(o => `<option value="${esc(o)}"${o === cur ? ' selected' : ''}>${esc(o)}</option>`).join('');
+  } catch(_) {}
+}
+
+async function loadCurrencies() {
+  try {
+    const curs = await fetch(`/api/statements/currencies?account=${activeAccount}`).then(r => r.json());
+    const sel  = document.getElementById('sf-currency');
+    const cur  = sel.value;
+    sel.innerHTML = '<option value="">All</option>' +
+      curs.map(c => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(c)}</option>`).join('');
+  } catch(_) {}
+}
+
+function updateShowAllUI() {
+  const btn = document.getElementById('btn-show-all');
+  btn.textContent = showAll ? 'Unmatched only' : 'Show all';
+  btn.classList.toggle('active', showAll);
+  document.getElementById('fn-panel-title').textContent = showAll ? 'All Fortnox' : 'Unmatched Fortnox';
+  document.getElementById('bn-panel-title').textContent = showAll ? 'All Statements' : 'Unmatched Statements';
+}
+
+async function loadChartOfAccounts() {
+  try {
+    chartOfAccounts = await fetch('/api/chart-of-accounts').then(r => r.json());
+  } catch(_) {}
+}
+
+async function refresh() {
+  const extra = showAll ? { account: activeAccount, show: 'all' } : { account: activeAccount };
+  const qs    = filterParams(extra);
+
+  const [fn, st, stats] = await Promise.all([
+    fetch('/api/unmatched/fortnox'    + qs).then(r => r.json()),
+    fetch('/api/unmatched/statements' + qs).then(r => r.json()),
+    fetch('/api/stats').then(r => r.json()),
+  ]);
+
+  // Fetch FX rates for all unique currency:date pairs in one batch
+  const pairs = [...new Map(
+    st.map(r => {
+      const date = String(r.date).slice(0,10);
+      const key  = `${r.currency}:${date}`;
+      return [key, { coin: r.currency, date }];
+    })
+  ).values()];
+  if (pairs.length) {
+    try {
+      const pqs   = pairs.map(p => `${p.coin}:${p.date}`).join(',');
+      const rates = await fetch('/api/fx-rates?pairs=' + encodeURIComponent(pqs)).then(r => r.json());
+      Object.assign(fxRates, rates);
+    } catch(_) {}
+  }
+
+  renderFortnox(fn);
+  renderStatements(st);
+  renderStats(stats);
+
+  // Refresh account switcher buttons (new data may have arrived)
+  loadAccountSwitcher();
+}
+
+function renderTotals(fnRows, stRows) {
+  const fnTotal = fnRows.reduce((s, r) => s + parseFloat(r.kredit || 0), 0);
+  document.getElementById('fn-total').textContent = fnTotal > 0 ? fmtNum(fnTotal) + ' SEK' : '';
+
+  let stTotal = 0, stCovered = 0;
+  for (const r of stRows) {
+    const date = String(r.date).slice(0, 10);
+    const rate = fxRates[`${r.currency}:${date}`];
+    if (rate) { stTotal += Math.abs(parseFloat(r.amount)) * rate; stCovered++; }
+  }
+  const pct = stRows.length ? Math.round(stCovered / stRows.length * 100) : 0;
+  document.getElementById('bn-total').textContent =
+    stTotal > 0 ? fmtNum(stTotal) + ' SEK' + (pct < 100 ? ` (${pct}% priced)` : '') : '';
+}
+
+// ── Render helpers ────────────────────────────────────────────────
+function renderFortnox(rows) {
+  fnRows = rows;
+  document.getElementById('fn-count').textContent = rows.length;
+
+  const sorted = [...rows].sort((a, b) => {
+    const mul = fnSort.dir === 'asc' ? 1 : -1;
+    if (fnSort.col === 'vernr') {
+      return String(a.vernr || '').localeCompare(String(b.vernr || ''), undefined, { numeric: true }) * mul;
+    }
+    const da = String(a.bokforingsdatum).slice(0,10);
+    const db = String(b.bokforingsdatum).slice(0,10);
+    return da < db ? -mul : da > db ? mul : 0;
+  });
+
+  const tbody = document.getElementById('fn-body');
+  tbody.innerHTML = '';
+  sorted.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.dataset.id = r.id;
+    if (r.is_matched) tr.classList.add('matched-row');
+    if (selectedFns.has(r.id)) tr.classList.add('selected');
+    const matchedIcon = r.is_matched ? '<span style="color:#22c55e;font-size:10px" title="Matched">✓</span> ' : ''; // #22c55e stays hardcoded
+    tr.innerHTML = `
+      <td>${matchedIcon}${esc(r.vernr)}</td>
+      <td class="date">${fmtDate(r.bokforingsdatum)}</td>
+      <td title="${esc(r.verifikationstext)}">${esc(truncate(r.verifikationstext,28))}</td>
+      <td class="muted" title="${esc(r.transaktionsinfo)}">${esc(truncate(r.transaktionsinfo,24))}</td>
+      <td class="num debet">${fmtNum(r.debet)}</td>
+      <td class="num">${fmtNum(r.kredit)}</td>
+      <td class="muted">${esc(r.project_currency)}</td>
+    `;
+    tr.addEventListener('click', () => selectFn(r, tr));
+    tbody.appendChild(tr);
+  });
+}
+
+function renderStatements(rows) {
+  bnRows = rows; // keep bnRows name for shared selection/proposal code
+  document.getElementById('bn-count').textContent = rows.length;
+
+  // Attach computed SEK for sorting/filtering
+  let annotated = rows.map(r => {
+    const date = String(r.date).slice(0, 10);
+    const rate = fxRates[`${r.currency}:${date}`];
+    const sek  = rate != null ? parseFloat(r.amount) * rate : null;
+    return { ...r, _sek: sek, _date: date };
+  });
+
+  // linkedFilter: show only the matched counterpart(s) for a selected matched Fortnox row
+  if (linkedFilter) {
+    annotated = annotated.filter(r => linkedFilter.has(r.id));
+  } else if (smartFilter) {
+    if (smartFilter.exactIds) {
+      annotated = annotated.filter(r => smartFilter.exactIds.has(r.id));
+    } else {
+      annotated = annotated.filter(r => {
+        if (r._sek == null) return false;
+        const checkSek = smartFilter.signCheck === 'negative' ? -r._sek : r._sek;
+        const inSek  = checkSek >= smartFilter.sekMin && checkSek <= smartFilter.sekMax;
+        const inDate = r._date >= smartFilter.dateMin && r._date <= smartFilter.dateMax;
+        return inSek && inDate;
+      });
+    }
+  }
+
+  // Apply client-side filters from statement panel
+  const sfType     = document.getElementById('sf-type')?.value     || '';
+  const sfCurrency = document.getElementById('sf-currency')?.value || '';
+  const sfAmtFrom  = document.getElementById('sf-amt-from')?.value;
+  const sfAmtTo    = document.getElementById('sf-amt-to')?.value;
+  const sfSekFrom  = document.getElementById('sf-sek-from')?.value;
+  const sfSekTo    = document.getElementById('sf-sek-to')?.value;
+
+  if (sfType)     annotated = annotated.filter(r => r.type === sfType);
+  if (sfCurrency) annotated = annotated.filter(r => r.currency === sfCurrency);
+  if (sfAmtFrom)  annotated = annotated.filter(r => Math.abs(parseFloat(r.amount)) >= parseFloat(sfAmtFrom));
+  if (sfAmtTo)    annotated = annotated.filter(r => Math.abs(parseFloat(r.amount)) <= parseFloat(sfAmtTo));
+  if (sfSekFrom)  annotated = annotated.filter(r => r._sek != null && Math.abs(r._sek) >= parseFloat(sfSekFrom));
+  if (sfSekTo)    annotated = annotated.filter(r => r._sek != null && Math.abs(r._sek) <= parseFloat(sfSekTo));
+
+  // Sort
+  const mul = bnSort.dir === 'asc' ? 1 : -1;
+  annotated.sort((a, b) => {
+    switch (bnSort.col) {
+      case 'date':     return String(a.date).localeCompare(String(b.date)) * mul;
+      case 'type':     return String(a.type || '').localeCompare(String(b.type || '')) * mul;
+      case 'currency': return String(a.currency || '').localeCompare(String(b.currency || '')) * mul;
+      case 'remark':   return String(a.remark || a.transaction_id || '').localeCompare(String(b.remark || b.transaction_id || '')) * mul;
+      case 'sek':      return ((a._sek ?? -Infinity) - (b._sek ?? -Infinity)) * mul;
+      case 'amount':   return (parseFloat(a.amount) - parseFloat(b.amount)) * mul;
+      default:         return 0;
+    }
+  });
+
+  // Update count and totals based on filtered rows
+  document.getElementById('bn-count').textContent = annotated.length;
+  renderTotals(fnRows, annotated);
+
+  const tbody = document.getElementById('bn-body');
+  tbody.innerHTML = '';
+  annotated.forEach(r => {
+    const amount    = parseFloat(r.amount);
+    const isNeg     = amount < 0;
+    const amtColor  = isNeg ? '#f87171' : '#86efac';
+    const sekDisplay = r._sek != null
+      ? `<span style="color:${isNeg ? '#f87171' : 'var(--text-accent)'}">${isNeg ? '-' : ''}${fmtNum(Math.abs(r._sek))}</span>`
+      : '<span style="color:var(--border)">—</span>';
+    const subtypeTag = r.subtype
+      ? `<span style="color:var(--text-muted);font-size:10px"> ${esc(r.subtype)}</span>` : '';
+
+    const tr = document.createElement('tr');
+    tr.dataset.id = r.id;
+    if (r.is_matched) tr.classList.add('matched-row');
+    if (selectedBns.has(r.id)) tr.classList.add('selected');
+    const matchedIcon = r.is_matched ? '<span style="color:#22c55e;font-size:10px" title="Matched">✓</span> ' : ''; // #22c55e stays hardcoded
+    // Build contra_account select
+    const acctOptions = chartOfAccounts.map(a =>
+      `<option value="${a.account_number}" ${r.contra_account == a.account_number ? 'selected' : ''}>${a.account_number} ${esc(a.account_name)}</option>`
+    ).join('');
+
+    tr.innerHTML = `
+      <td class="date">${fmtDateTime(r.date)}</td>
+      <td>${matchedIcon}${esc(r.type)}${subtypeTag}</td>
+      <td>${esc(r.currency)}</td>
+      <td class="num" style="color:${amtColor}">${fmtNum8(r.amount)}</td>
+      <td class="num">${sekDisplay}</td>
+      <td class="muted" title="${esc(r.remark || r.transaction_id)}">${esc(truncate(r.remark || r.transaction_id, 28))}</td>
+      <td class="ca-cell"><select class="acct-select"><option value="">—</option>${acctOptions}</select></td>
+      <td class="vt-cell"><input class="voucher-input" type="text" value="${esc(r.voucher_text || '')}" placeholder="voucher text"></td>
+    `;
+    tr.addEventListener('click', () => selectBn(r, tr));
+
+    // Contra account: save immediately on change
+    const caCell = tr.querySelector('.ca-cell');
+    const acctSel = caCell.querySelector('select');
+    acctSel.addEventListener('click', e => e.stopPropagation());
+    acctSel.addEventListener('change', e => {
+      e.stopPropagation();
+      saveStatementField(r.id, { contra_account: acctSel.value || null }, caCell);
+    });
+
+    // Voucher text: debounced + onBlur
+    const vtCell = tr.querySelector('.vt-cell');
+    const vtInput = vtCell.querySelector('input');
+    vtInput.addEventListener('click', e => e.stopPropagation());
+    const debouncedSave = debounce(() => saveStatementField(r.id, { voucher_text: vtInput.value }, vtCell), 700);
+    vtInput.addEventListener('input', debouncedSave);
+    vtInput.addEventListener('blur', () => saveStatementField(r.id, { voucher_text: vtInput.value }, vtCell));
+
+    tbody.appendChild(tr);
+  });
+
+  // Keep reference to current filtered rows for export
+  filteredStRows = annotated;
+}
+
+function renderMatches(rows) {
+  document.getElementById('mx-count').textContent = rows.length;
+  const tbody = document.getElementById('mx-body');
+  tbody.innerHTML = '';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><button class="unmatch-btn" title="Remove match" data-id="${r.id}">✕</button></td>
+      <td class="match-type-${r.match_type}">${r.match_type}</td>
+      <td class="date">${fmtDate(r.bokforingsdatum)}</td>
+      <td>${esc(r.vernr)}</td>
+      <td title="${esc(r.verifikationstext)}">${esc(truncate(r.verifikationstext,30))}</td>
+      <td class="num">${fmtNum(r.f_kredit)}</td>
+      <td>${esc(r.s_type ?? '—')}</td>
+      <td>${esc(r.currency ?? '—')}</td>
+      <td class="num">${r.s_amount != null ? fmtNum8(r.s_amount) : '—'}</td>
+      <td class="num" style="color:var(--text-total-sek)">${r.fx_rate_used ? parseFloat(r.fx_rate_used).toFixed(4) : '—'}</td>
+      <td class="muted" title="${esc(r.notes)}">${esc(truncate(r.notes,32))}</td>
+      <td class="muted">${esc(r.matched_by)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  // Wire unmatch buttons
+  tbody.querySelectorAll('.unmatch-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Remove this match?')) return;
+      await fetch(`/api/matches/${btn.dataset.id}`, { method: 'DELETE' });
+      toast('Match removed');
+      refresh();
+    });
+  });
+}
+
+function renderStats(stats) {
+  // Fortnox — find row for active account
+  const fnRow = (stats.fortnox || []).find(r => r.konto === activeAccount);
+  document.getElementById('stat-fn').textContent = fnRow ? fnRow.total : '—';
+
+  // Statements — find row for active account
+  const stRow = (stats.statements || []).find(r => r.account === activeAccount);
+  document.getElementById('stat-st').textContent = stRow ? stRow.total : '—';
+
+  const total = (stats.matches || []).reduce((s, m) => s + parseInt(m.count || 0), 0);
+  document.getElementById('stat-mx').textContent  = total;
+  document.getElementById('mx-count').textContent = total;
+}
+
+// ── Selection & proposal ──────────────────────────────────────────
+function selectFn(row, tr) {
+  if (row.is_matched) {
+    // ── Matched row: show detail, filter statements to counterpart ──
+    // Deselect if already selected
+    if (selectedFns.has(row.id)) {
+      clearSelection();
+      return;
+    }
+    clearSelection();
+    selectedFns.set(row.id, row);
+    tr.classList.add('selected');
+    selectMatchedFn(row);
+    return;
+  }
+
+  // ── Unmatched row: smart filter + proposal bar ──────────────────
+  if (selectedFns.has(row.id)) {
+    selectedFns.delete(row.id);
+    tr.classList.remove('selected');
+    if (selectedFns.size === 0) {
+      smartFilter = null;
+      document.getElementById('smart-filter-tag').style.display = 'none';
+      renderStatements(bnRows);
+    }
+    updateProposalBar();
+    return;
+  }
+
+  selectedFns.set(row.id, row);
+  tr.classList.add('selected');
+
+  const isDebet = parseFloat(row.debet) > 0 && parseFloat(row.kredit || 0) === 0;
+  const sek     = isDebet ? parseFloat(row.debet) : parseFloat(row.kredit);
+  const date    = String(row.bokforingsdatum).slice(0, 10);
+
+  const fnTexts = [row.verifikationstext, row.transaktionsinfo]
+    .filter(Boolean).map(s => s.trim().toLowerCase());
+
+  const exactMatches = fnTexts.length
+    ? bnRows.filter(r => {
+        const stTexts = [r.remark, r.transaction_id]
+          .filter(Boolean).map(s => s.trim().toLowerCase());
+        return stTexts.some(t => fnTexts.includes(t));
+      })
+    : [];
+
+  if (exactMatches.length) {
+    smartFilter = { exactIds: new Set(exactMatches.map(r => r.id)) };
+    const label = exactMatches.length === 1
+      ? `exact: "${exactMatches[0].remark || exactMatches[0].transaction_id}"`
+      : `${exactMatches.length} exact text matches`;
+    document.getElementById('sf-desc').textContent = label;
+    document.getElementById('sf-icon').textContent = '🎯';
+    document.getElementById('smart-filter-tag').style.background = 'var(--bg-row-proposed)';
+    document.getElementById('smart-filter-tag').style.color = '#4ade80';
+    document.getElementById('smart-filter-tag').style.display = '';
+  } else if (sek > 0) {
+    const totalSek = [...selectedFns.values()].reduce((s, r) => {
+      const d = parseFloat(r.debet || 0), k = parseFloat(r.kredit || 0);
+      return s + (d > 0 && k === 0 ? d : k);
+    }, 0);
+    smartFilter = {
+      sekMin:   totalSek * 0.90,
+      sekMax:   totalSek * 1.10,
+      dateMin:  addDays(date, -2),
+      dateMax:  addDays(date,  2),
+      signCheck: isDebet ? 'positive' : 'negative',
+    };
+    document.getElementById('sf-desc').textContent =
+      selectedFns.size > 1
+        ? `Σ ${fmtNum(totalSek)} (${selectedFns.size} rows) ±10% · ${date} ±2d`
+        : `${fmtNum(sek)} ±10% · ${date} ±2d`;
+    document.getElementById('sf-icon').textContent = '⚡';
+    document.getElementById('smart-filter-tag').style.background = 'var(--bg-proposal-bar)';
+    document.getElementById('smart-filter-tag').style.color = 'var(--text-date)';
+    document.getElementById('smart-filter-tag').style.display = '';
+  }
+
+  renderStatements(bnRows);
+  renderTotals(fnRows, bnRows);
+  updateProposalBar();
+}
+
+async function selectMatchedFn(row) {
+  try {
+    const matches = await fetch(`/api/matches/by-fortnox/${row.id}`).then(r => r.json());
+    // Filter statement panel to show only matched counterparts
+    linkedFilter = new Set(matches.map(m => m.statement_id).filter(Boolean));
+    renderStatements(bnRows);
+    renderMatchDetail(matches, row);
+  } catch(e) {
+    toast('Could not load match details', true);
+  }
+}
+
+function renderMatchDetail(matches, fnRow) {
+  const content = document.getElementById('detail-content');
+  if (!matches.length) {
+    content.innerHTML = '<div class="detail-empty">No match records found for this row.</div>';
+    return;
+  }
+
+  content.innerHTML = matches.map(m => `
+    <div class="match-detail-card">
+      <div class="match-detail-header">
+        <span class="match-type-${m.match_type}" style="font-weight:600;font-size:12px">${m.match_type}</span>
+        <span>Matched by <strong>${esc(m.matched_by || '—')}</strong> · ${fmtDateTime(m.matched_at)}</span>
+        ${m.notes ? `<span style="color:var(--text-muted);font-style:italic">${esc(m.notes)}</span>` : ''}
+        <button class="btn btn-cancel unmatch-btn" data-id="${m.id}" style="margin-left:auto;padding:2px 8px;font-size:11px">✕ Unmatch</button>
+      </div>
+      <div class="match-detail-sides">
+        <div class="match-side">
+          <div class="match-side-label">Fortnox</div>
+          <div style="color:var(--text-header)">${esc(fnRow.vernr)} · ${fmtDate(fnRow.bokforingsdatum)}</div>
+          <div style="color:var(--text-muted)">${esc(truncate(fnRow.verifikationstext, 45))}</div>
+          <div class="num match-side-amount" style="color:var(--text-num)">${fmtNum(fnRow.kredit)} SEK</div>
+        </div>
+        <div class="match-arrow">↔</div>
+        <div class="match-side">
+          <div class="match-side-label">Statement</div>
+          <div style="color:var(--text-header)">${esc(m.source || '—')} · ${fmtDateTime(m.s_date)}</div>
+          <div style="color:var(--text-muted)">${esc(m.s_type || '')}${m.subtype ? ' / '+esc(m.subtype) : ''} · ${esc(m.currency || '')}</div>
+          <div class="num match-side-amount" style="color:var(--text-accent)">${fmtNum8(m.s_amount)} ${esc(m.currency || '')}</div>
+        </div>
+      </div>
+      ${m.fx_rate_used ? `<div class="match-detail-footer">FX rate: 1 ${esc(m.currency)} = ${parseFloat(m.fx_rate_used).toFixed(4)} SEK</div>` : ''}
+    </div>
+  `).join('');
+
+  content.querySelectorAll('.unmatch-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Remove this match?')) return;
+      try {
+        const res = await fetch(`/api/matches/${btn.dataset.id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        toast('Match removed');
+        clearSelection();
+        refresh();
+      } catch (err) {
+        toast('Unmatch failed: ' + err.message, true);
+      }
+    });
+  });
+}
+
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function selectAllStatements() {
+  const tbody = document.getElementById('bn-body');
+  const trs = [...tbody.querySelectorAll('tr')];
+  const allSelected = trs.every(tr => tr.classList.contains('proposed'));
+  if (allSelected) {
+    trs.forEach(tr => {
+      const id = parseInt(tr.dataset.id);
+      selectedBns.delete(id);
+      tr.classList.remove('proposed');
+    });
+  } else {
+    trs.forEach(tr => {
+      const id = parseInt(tr.dataset.id);
+      if (!selectedBns.has(id)) {
+        const row = bnRows.find(r => r.id === id);
+        if (row) { selectedBns.set(id, row); tr.classList.add('proposed'); }
+      }
+    });
+  }
+  updateProposalBar();
+}
+
+function selectBn(row, tr) {
+  // Toggle: clicking a selected row deselects it
+  if (selectedBns.has(row.id)) {
+    selectedBns.delete(row.id);
+    tr.classList.remove('proposed');
+  } else {
+    selectedBns.set(row.id, row);
+    tr.classList.add('proposed');
+  }
+  updateProposalBar();
+}
+
+async function updateProposalBar() {
+  const bar    = document.getElementById('proposal-bar');
+  const bnList = [...selectedBns.values()];
+  const fnList = [...selectedFns.values()];
+  if (fnList.length === 0 && bnList.length === 0) { bar.classList.remove('visible'); return; }
+  bar.classList.add('visible');
+
+  const btnConfirm   = document.getElementById('btn-confirm');
+  const btnExplainFn = document.getElementById('btn-explain-fn');
+  const btnExplainBn = document.getElementById('btn-explain-bn');
+
+  // ── Statement-only selection (no Fortnox selected) ──
+  if (fnList.length === 0) {
+    const net   = bnList.reduce((s, r) => s + parseFloat(r.amount), 0);
+    const src   = bnList[0].source || 'Exchange';
+    const label = bnList.length === 1
+      ? `${src}: ${bnList[0].type} ${fmtNum8(bnList[0].amount)} ${bnList[0].currency}`
+      : `${bnList.length} rows selected (${src}) — net: ${fmtNum8(net)}`;
+    document.getElementById('proposal-desc').textContent = label;
+    document.getElementById('proposal-rate').textContent =
+      bnList.length >= 2 && Math.abs(net) < 0.00001
+        ? '✓ Net = 0 — internal transfer pair'
+        : 'Select a Fortnox line to match, or explain these rows';
+    btnConfirm.style.display   = 'none';
+    btnExplainFn.style.display = 'none';
+    btnExplainBn.style.display = '';
+    return;
+  }
+
+  // ── One or more Fortnox rows selected ──
+  // Sum all selected Fortnox kredit rows
+  const fnSekTotal = fnList.reduce((s, r) => s + parseFloat(r.kredit || 0), 0);
+  const fnDesc = fnList.length === 1
+    ? `Fortnox ${fnList[0].vernr} ${fmtDate(fnList[0].bokforingsdatum)} — ${fmtNum(fnList[0].kredit)} SEK`
+    : `${fnList.length} Fortnox rows (${fnList.map(r => r.vernr).join(', ')}) — Σ ${fmtNum(fnSekTotal)} SEK`;
+
+  btnExplainFn.style.display = '';
+  btnExplainBn.style.display = bnList.length > 0 ? '' : 'none';
+
+  if (bnList.length === 0) {
+    document.getElementById('proposal-desc').textContent = `${fnDesc}  — select statement row(s) to match`;
+    document.getElementById('proposal-rate').textContent = '';
+    btnConfirm.style.display = 'none';
+    return;
+  }
+
+  // Fetch FX using the date of the first (most recent clicked) Fortnox row
+  const dateStr = String(fnList[fnList.length - 1].bokforingsdatum).slice(0, 10);
+  const sumCoin = bnList.reduce((s, r) => s + Math.abs(parseFloat(r.amount)), 0);
+  const coins   = [...new Set(bnList.map(r => r.currency))].join('+');
+  const label   = bnList.length === 1
+    ? `${fnDesc}  ↔  ${bnList[0].type} ${fmtNum8(bnList[0].amount)} ${bnList[0].currency}`
+    : `${fnDesc}  ↔  ${bnList.length} stmt rows (Σ ${fmtNum8(sumCoin)} ${coins})`;
+
+  document.getElementById('proposal-desc').textContent = label;
+  document.getElementById('proposal-rate').textContent = 'Fetching FX...';
+  btnConfirm.style.display = '';
+
+  try {
+    const coinSet = [...new Set(bnList.map(r => r.currency))];
+    const rateMap = {};
+    await Promise.all(coinSet.map(async coin => {
+      const fx = await fetch(`/api/fx-rate?date=${dateStr}&coin=${encodeURIComponent(coin)}`).then(r => r.json());
+      if (fx.rate) rateMap[coin] = fx.rate;
+    }));
+
+    bnList.forEach(r => {
+      const rate = rateMap[r.currency];
+      r._fxRate = rate || null;
+      r._bnSek  = rate ? Math.abs(parseFloat(r.amount)) * rate : null;
+    });
+    const bnSekTotal = bnList.reduce((s, r) => s + (r._bnSek || 0), 0);
+    const allPriced  = bnList.every(r => r._bnSek != null);
+
+    if (bnSekTotal > 0) {
+      const diff     = fnSekTotal > 0 ? ((bnSekTotal - fnSekTotal) / fnSekTotal * 100) : 0;
+      const color    = Math.abs(diff) <= 2 ? '#4ade80' : Math.abs(diff) <= 10 ? '#fbbf24' : '#f87171';
+      const rateDesc = coinSet.map(c => rateMap[c]
+        ? `1 ${c} = ${rateMap[c] > 1000 ? Math.round(rateMap[c]).toLocaleString('sv-SE') : rateMap[c].toFixed(4)} SEK`
+        : `${c} N/A`).join(' · ');
+      document.getElementById('proposal-rate').innerHTML =
+        `${rateDesc} &nbsp;|&nbsp; Σ ≈ <b>${fmtNum(bnSekTotal)}</b> SEK` +
+        (allPriced ? ` &nbsp;|&nbsp; <span style="color:${color}">diff ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%</span>` : ' (partial pricing)');
+    } else {
+      document.getElementById('proposal-rate').textContent = 'FX rate unavailable for selected coins';
+    }
+  } catch(e) {
+    document.getElementById('proposal-rate').textContent = 'FX fetch error';
+  }
+}
+
+// ── Actions ───────────────────────────────────────────────────────
+async function confirmMatch() {
+  const bnList = [...selectedBns.values()];
+  const fnList = [...selectedFns.values()];
+  if (fnList.length === 0 || bnList.length === 0) return;
+  const notes = document.getElementById('proposal-notes').value.trim();
+
+  // Many-to-1: each Fortnox row × each statement row = one match record per pair
+  // Typical use cases:
+  //   1 Fortnox + N statement rows (1-to-many)
+  //   N Fortnox + 1 statement row  (many-to-1)
+  let matchCount = 0;
+  for (const fn of fnList) {
+    for (const bn of bnList) {
+      const rate = bn._fxRate || null;
+      const body = {
+        fortnox_id:   fn.id,
+        statement_id: bn.id,
+        match_type:   'manual',
+        fx_rate_used: rate ? parseFloat(rate).toFixed(6) : null,
+        notes,
+        matched_by:   'user',
+      };
+      const r = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) { toast('Error saving match', true); return; }
+      matchCount++;
+    }
+  }
+  toast(`${matchCount} match${matchCount > 1 ? 'es' : ''} confirmed`);
+  clearSelection();
+  refresh();
+}
+
+async function explainBinance() {
+  const bnList = [...selectedBns.values()];
+  if (bnList.length === 0) return;
+  const notes = document.getElementById('proposal-notes').value.trim() || prompt('Explanation note (e.g. internal transfer, staking):');
+  if (!notes) return;
+
+  for (const bn of bnList) {
+    const body = {
+      fortnox_id:   [...selectedFns.values()][0]?.id || null,
+      statement_id: bn.id,
+      match_type:   'explained',
+      notes,
+      matched_by:   'user',
+    };
+    const r = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) { toast('Error saving explanation', true); return; }
+  }
+  toast(`${bnList.length} Binance row${bnList.length > 1 ? 's' : ''} explained`);
+  clearSelection();
+  refresh();
+}
+
+async function explainFortnox() {
+  const fnList = [...selectedFns.values()];
+  if (fnList.length === 0) return;
+  const notes = document.getElementById('proposal-notes').value.trim() || prompt('Explanation note:');
+  if (!notes) return;
+
+  for (const fn of fnList) {
+    const body = { fortnox_id: fn.id, match_type: 'explained', notes, matched_by: 'user' };
+    const r = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) { toast('Error saving explanation', true); return; }
+  }
+  toast(`${fnList.length} Fortnox row${fnList.length > 1 ? 's' : ''} marked as explained`);
+  clearSelection();
+  refresh();
+}
+
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+
+async function saveStatementField(id, fields, tdEl) {
+  try {
+    const res = await fetch(`/api/statements/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) throw new Error();
+    tdEl.classList.remove('save-err');
+    tdEl.classList.add('save-ok');
+    setTimeout(() => tdEl.classList.remove('save-ok'), 800);
+  } catch(_) {
+    tdEl.classList.remove('save-ok');
+    tdEl.classList.add('save-err');
+    setTimeout(() => tdEl.classList.remove('save-err'), 1500);
+  }
+}
+
+function exportStatements() {
+  if (!filteredStRows.length) { toast('No rows to export', true); return; }
+
+  const data = filteredStRows.map(r => {
+    const acct = chartOfAccounts.find(a => a.account_number == r.contra_account);
+    return {
+      Date:             fmtDateTime(r.date),
+      Type:             r.type       || '',
+      Subtype:          r.subtype    || '',
+      Currency:         r.currency   || '',
+      Amount:           parseFloat(r.amount),
+      Fee:              r.fee != null ? parseFloat(r.fee) : '',
+      'SEK (approx)':   r._sek != null ? parseFloat(Math.abs(r._sek).toFixed(2)) : '',
+      'Transaction ID': r.transaction_id || '',
+      Remark:           r.remark     || '',
+      Source:           r.source     || '',
+      Account:          r.account    || '',
+      'Contra Account': r.contra_account || '',
+      'Contra Name':    acct ? acct.account_name : '',
+      'Voucher Text':   r.voucher_text || '',
+    };
+  });
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Statements');
+
+  // Column widths
+  ws['!cols'] = [
+    {wch:18},{wch:14},{wch:12},{wch:10},{wch:16},{wch:12},
+    {wch:14},{wch:36},{wch:36},{wch:10},{wch:8},{wch:10},{wch:28},{wch:30},
+  ];
+
+  const date = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `statements_${activeAccount}_${date}.xlsx`);
+  toast(`Exported ${filteredStRows.length} rows`);
+}
+
+function clearSelection() {
+  selectedFns  = new Map();
+  selectedBns  = new Map();
+  smartFilter  = null;
+  linkedFilter = null;
+  document.getElementById('smart-filter-tag').style.display = 'none';
+  document.querySelectorAll('tr.selected, tr.proposed').forEach(t => t.classList.remove('selected', 'proposed'));
+  document.getElementById('proposal-bar').classList.remove('visible');
+  document.getElementById('proposal-notes').value = '';
+  document.getElementById('detail-content').innerHTML =
+    '<div class="detail-empty">Click any matched row (✓) on either side to view match details here.</div>';
+  renderStatements(bnRows);
+  renderTotals(fnRows, bnRows);
+}
+
+// ── Utilities ─────────────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function truncate(s, n) { if (!s) return ''; return s.length > n ? s.slice(0,n) + '…' : s; }
+function fmtDate(d) { if (!d) return ''; return String(d).slice(0,10); }
+function fmtDateTime(d) { if (!d) return ''; return String(d).slice(0,16).replace('T',' '); }
+function fmtNum(n) { if (n == null || n == 0) return ''; return parseFloat(n).toLocaleString('sv-SE', {minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtNum8(n) { if (n == null) return ''; return parseFloat(n).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:8}); }
+
+// ── FX refresh status ─────────────────────────────────────────────
+let fxPollTimer = null;
+
+function setFxStatus(msg, spinning = false) {
+  const el = document.getElementById('fx-status');
+  el.textContent = (spinning ? '⏳ ' : '') + msg;
+}
+
+function pollFxStatus(total) {
+  clearInterval(fxPollTimer);
+  fxPollTimer = setInterval(async () => {
+    try {
+      const s = await fetch('/api/fx-rates/status').then(r => r.json());
+      setFxStatus(`${s.done} / ${s.total} processed, ${s.saved} saved…`, true);
+      if (!s.running) {
+        clearInterval(fxPollTimer);
+        const missing = s.errors > 0 ? `, ${s.errors} missing` : '';
+        setFxStatus(`✓ ${s.saved} saved${missing}`, false);
+        document.getElementById('btn-refresh-fx').disabled = false;
+        // Reload FX rates for currently visible rows
+        refresh();
+      }
+    } catch(_) {}
+  }, 2000);
+}
+
+function toast(msg, err = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.borderColor = err ? '#f87171' : 'var(--border)';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Tab switching
+// ═══════════════════════════════════════════════════════════════════
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    const id = 'tab-' + btn.dataset.tab;
+    document.getElementById(id).classList.add('active');
+    if (btn.dataset.tab === 'fx') loadFxView();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// FX Rates view
+// ═══════════════════════════════════════════════════════════════════
+const USD_STABLECOINS_SET = new Set(['USDT','USDC','BUSD','DAI','TUSD','FDUSD','USDP','UST']);
+
+// Assign a distinct colour per coin
+const COIN_COLORS = {
+  BTC:'#f7931a', ETH:'#627eea', BNB:'#f3ba2f', SOL:'#9945ff',
+  ADA:'#0033ad', XRP:'#346aa9', MATIC:'#8247e5', LINK:'#2a5ada',
+  DOT:'#e6007a', LTC:'#bfbbbb', BCH:'#8dc351', AVAX:'#e84142',
+  ATOM:'#2e3148', UNI:'#ff007a', DOGE:'#c3a634', TRX:'#ef0027',
+  ETC:'#669073', XLM:'#7d00ff', FIL:'#0090ff', VET:'#15bdff',
+  USDT:'#26a17b', USDC:'#2775ca', BUSD:'#f0b90b', DAI:'#f4b731',
+  TUSD:'#002868', FDUSD:'#1ba27a', USDP:'#00a3e0', UST:'#5493f7',
+};
+
+let fxChart = null;
+let stableChart = null;
+let activeCoinSet = new Set();
+
+async function loadFxView() {
+  const [rates, coverage] = await Promise.all([
+    fetch('/api/fx-rates/table').then(r => r.json()),
+    fetch('/api/fx-rates/coverage').then(r => r.json()).catch(() => []),
+  ]);
+
+  if (!rates.length) {
+    document.getElementById('cov-grid').innerHTML =
+      '<p style="color:var(--text-muted);font-size:12px">No FX rates stored yet. Click ↻ Refresh FX to fetch them.</p>';
+    return;
+  }
+
+  // Group rates by coin
+  const byCoin = {};
+  for (const row of rates) {
+    const c = row.coin;
+    (byCoin[c] = byCoin[c] || []).push({ x: row.rate_date.slice(0,10), y: parseFloat(row.rate_sek) });
+  }
+  const allCoins = Object.keys(byCoin).sort();
+
+  // Build toggle buttons if not yet built
+  const togglesEl = document.getElementById('coin-toggles');
+  if (!togglesEl.children.length) {
+    activeCoinSet = new Set(allCoins);
+    for (const coin of allCoins) {
+      const btn = document.createElement('button');
+      btn.className = 'coin-toggle on';
+      btn.dataset.coin = coin;
+      btn.textContent = coin;
+      const color = COIN_COLORS[coin] || '#888';
+      btn.style.cssText = `background:${color}22;border-color:${color};color:${color}`;
+      btn.addEventListener('click', () => {
+        const on = btn.classList.toggle('on');
+        if (on) activeCoinSet.add(coin); else activeCoinSet.delete(coin);
+        rebuildCharts(byCoin, allCoins);
+      });
+      togglesEl.appendChild(btn);
+    }
+  }
+
+  // Coverage grid
+  renderCoverage(coverage, allCoins);
+
+  // Charts
+  rebuildCharts(byCoin, allCoins);
+
+  // Scale selector
+  document.getElementById('fx-scale').onchange = () => rebuildCharts(byCoin, allCoins);
+  document.getElementById('btn-fx-reload').onclick = () => {
+    fxChart?.destroy(); fxChart = null;
+    stableChart?.destroy(); stableChart = null;
+    togglesEl.innerHTML = '';
+    activeCoinSet = new Set();
+    loadFxView();
+  };
+}
+
+function rebuildCharts(byCoin, allCoins) {
+  const scaleType   = document.getElementById('fx-scale').value;
+  const cryptoCoins = allCoins.filter(c => !USD_STABLECOINS_SET.has(c) && activeCoinSet.has(c));
+  const stableCoins = allCoins.filter(c =>  USD_STABLECOINS_SET.has(c) && activeCoinSet.has(c));
+  const mainCoins   = cryptoCoins.length ? cryptoCoins : allCoins.filter(c => activeCoinSet.has(c));
+  const stableCard  = document.getElementById('stable-card');
+
+  // Defer so the canvas has stable layout dimensions before Chart.js measures it
+  setTimeout(() => {
+    fxChart = buildLineChart('fx-chart', mainCoins, byCoin, scaleType,
+      val => val >= 1000 ? Math.round(val).toLocaleString('sv-SE') : val.toFixed(4));
+
+    if (stableCoins.length) {
+      stableCard.style.display = '';
+      stableChart = buildLineChart('stable-chart', stableCoins, byCoin, 'linear',
+        val => val.toFixed(4));
+    } else {
+      stableCard.style.display = 'none';
+    }
+  }, 50);
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function buildLineChart(canvasId, coins, byCoin, scaleType, fmtY) {
+  const canvas   = document.getElementById(canvasId);
+  // Destroy any existing chart on this canvas (avoids "canvas already in use")
+  const existing = Chart.getChart(canvas);
+  if (existing) existing.destroy();
+
+  // Build a sorted union of all dates across the active coins
+  const dateSet = new Set();
+  for (const coin of coins) {
+    for (const p of (byCoin[coin] || [])) dateSet.add(p.x);
+  }
+  const labels = [...dateSet].sort();
+
+  // For each coin build a value array aligned to labels (null = missing → gap)
+  const datasets = coins.map(coin => {
+    const byDate = {};
+    for (const p of (byCoin[coin] || [])) byDate[p.x] = p.y;
+    const color = COIN_COLORS[coin] || '#888';
+    return {
+      label: coin,
+      data: labels.map(d => byDate[d] ?? null),
+      borderColor: color,
+      backgroundColor: color + '18',
+      pointRadius: labels.length > 120 ? 1 : 3,
+      pointHoverRadius: 5,
+      borderWidth: 2,
+      tension: 0.2,
+      spanGaps: false,   // null = gap in line = missing date
+    };
+  });
+
+  // Thin x-axis labels: show one tick per month
+  const tickLabels = labels.map((d, i) => {
+    const prev = labels[i - 1];
+    const isFirstOfMonth = !prev || d.slice(0, 7) !== prev.slice(0, 7);
+    return isFirstOfMonth ? d.slice(0, 7) : '';   // "YYYY-MM" on month boundary
+  });
+
+  return new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: cssVar('--text-muted'), font: { size: 11 }, boxWidth: 14, padding: 16 },
+        },
+        tooltip: {
+          backgroundColor: cssVar('--bg-chart-card'),
+          borderColor: cssVar('--border-panel'),
+          borderWidth: 1,
+          titleColor: cssVar('--text-header'),
+          bodyColor: cssVar('--text-muted'),
+          callbacks: {
+            title: items => items[0]?.label ?? '',
+            label: ctx => ctx.parsed.y != null
+              ? ` ${ctx.dataset.label}: ${fmtY(ctx.parsed.y)} SEK`
+              : ` ${ctx.dataset.label}: —`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'category',
+          ticks: {
+            color: cssVar('--text-th'),
+            maxRotation: 0,
+            font: { size: 10 },
+            callback: (_val, i) => tickLabels[i] || null,
+          },
+          grid: { color: cssVar('--border') },
+        },
+        y: {
+          type: scaleType,
+          ticks: { color: cssVar('--text-th'), font: { size: 10 }, callback: fmtY },
+          grid:  { color: cssVar('--border') },
+        },
+      },
+    },
+  });
+}
+
+function renderCoverage(coverage, allCoins) {
+  const grid = document.getElementById('cov-grid');
+  if (!coverage.length) { grid.innerHTML = ''; return; }
+
+  // Build map from API
+  const covMap = {};
+  for (const r of coverage) covMap[r.coin] = r;
+
+  grid.innerHTML = allCoins.map(coin => {
+    const c    = covMap[coin];
+    if (!c) return '';
+    const have   = parseInt(c.have)   || 0;
+    const needed = parseInt(c.needed) || 1;
+    const pct    = Math.round(have / needed * 100);
+    const color  = COIN_COLORS[coin] || '#888';
+    const barColor = pct === 100 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#f87171';
+    return `
+      <div class="cov-card">
+        <div class="cov-coin" style="color:${color}">${coin}</div>
+        <div class="cov-bar-wrap">
+          <div class="cov-bar" style="width:${pct}%;background:${barColor}"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="cov-label">${have} / ${needed} dates</span>
+          <span class="cov-pct" style="color:${barColor}">${pct}%</span>
+        </div>
+        <div class="cov-label" style="margin-top:3px">${c.first_needed?.slice(0,10) ?? ''} → ${c.last_needed?.slice(0,10) ?? ''}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ── Theme toggle ─────────────────────────────────────────────── */
+(function () {
+  const html = document.documentElement;
+  const btn  = document.getElementById('btn-theme');
+
+  function applyTheme(theme) {
+    html.setAttribute('data-theme', theme);
+    btn.textContent = theme === 'dark' ? '☾ Dark' : '☀ Light';
+  }
+
+  // On load: read saved preference (default light)
+  const saved = localStorage.getItem('theme') || 'light';
+  applyTheme(saved);
+
+  btn.addEventListener('click', () => {
+    const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('theme', next);
+    applyTheme(next);
+  });
+})();
+</script>
+</body>
+</html>
