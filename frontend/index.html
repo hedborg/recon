@@ -713,6 +713,7 @@
         </span>
         <button class="btn-filter" id="btn-select-all-stmt" style="margin-left:auto" title="Select / deselect all visible statement rows">Select All</button>
         <button class="btn-filter" id="btn-export-stmt" style="margin-left:4px" title="Export filtered rows to Excel">↓ Export</button>
+        <button class="btn-filter" id="btn-export-pdf" style="margin-left:4px" title="Export summary PDF">↓ PDF</button>
         <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Click rows to select</span>
       </div>
 
@@ -836,6 +837,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-explain-bn').addEventListener('click', explainBinance);
   document.getElementById('btn-cancel').addEventListener('click', clearSelection);
   document.getElementById('btn-export-stmt').addEventListener('click', exportStatements);
+  document.getElementById('btn-export-pdf').addEventListener('click', exportPDF);
   document.getElementById('btn-select-all-stmt').addEventListener('click', selectAllStatements);
 
   document.getElementById('btn-apply-filter').addEventListener('click', () => {
@@ -1766,6 +1768,106 @@ function exportStatements() {
   const date = new Date().toISOString().slice(0,10);
   XLSX.writeFile(wb, `statements_${activeAccount}_${date}.xlsx`);
   toast(`Exported ${filteredStRows.length} rows`);
+}
+
+function exportPDF() {
+  if (!filteredStRows.length) { toast('No rows to export', true); return; }
+
+  // ── Summary by currency ──────────────────────────────────────────
+  const byCurrency = {};
+  for (const r of filteredStRows) {
+    const cur = r.currency || '?';
+    if (!byCurrency[cur]) byCurrency[cur] = { amount: 0, sek: 0 };
+    byCurrency[cur].amount += parseFloat(r.amount) || 0;
+    byCurrency[cur].sek    += r._sek || 0;
+  }
+  const summaryRows = Object.entries(byCurrency)
+    .sort((a, b) => Math.abs(b[1].sek) - Math.abs(a[1].sek));
+  const totalSek = summaryRows.reduce((s, [, v]) => s + v.sek, 0);
+
+  // ── Daily breakdown (all currencies → SEK) ───────────────────────
+  const byDate = {};
+  for (const r of filteredStRows) {
+    const d = r._date || String(r.date).slice(0, 10);
+    if (!byDate[d]) byDate[d] = 0;
+    byDate[d] += r._sek || 0;
+  }
+  const dailyRows = Object.entries(byDate).sort((a, b) => a[0].localeCompare(b[0]));
+
+  const accountName = document.querySelector('.acct-btn.active')?.textContent?.trim() || activeAccount;
+  const periodFrom  = filterFrom || '—';
+  const periodTo    = filterTo   || '—';
+  const generatedAt = new Date().toISOString().slice(0, 10);
+
+  const fmt  = n => new Intl.NumberFormat('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  const fmt8 = n => new Intl.NumberFormat('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 8 }).format(n);
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Statement Summary — ${accountName} ${periodFrom} to ${periodTo}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; padding: 32px; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .meta { color: #555; font-size: 11px; margin-bottom: 24px; }
+  h2 { font-size: 13px; margin: 20px 0 8px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  th { background: #f0f0f0; text-align: left; padding: 5px 8px; font-size: 11px; border-bottom: 2px solid #ccc; }
+  td { padding: 4px 8px; border-bottom: 1px solid #e8e8e8; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .total { font-weight: bold; background: #f7f7f7; }
+  @media print {
+    body { padding: 16px; }
+    button { display: none; }
+  }
+</style>
+</head>
+<body>
+<h1>Statement Summary — ${esc(accountName)}</h1>
+<div class="meta">Period: ${periodFrom} – ${periodTo} &nbsp;|&nbsp; ${filteredStRows.length} rows &nbsp;|&nbsp; Generated: ${generatedAt}</div>
+
+<h2>Summary by Currency</h2>
+<table>
+  <thead><tr><th>Currency</th><th class="num">Amount</th><th class="num">≈ SEK</th></tr></thead>
+  <tbody>
+    ${summaryRows.map(([cur, v]) => `
+    <tr>
+      <td>${esc(cur)}</td>
+      <td class="num">${fmt8(v.amount)}</td>
+      <td class="num">${fmt(v.sek)}</td>
+    </tr>`).join('')}
+    <tr class="total">
+      <td>Total</td>
+      <td class="num">—</td>
+      <td class="num">${fmt(totalSek)}</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Daily Breakdown (SEK)</h2>
+<table>
+  <thead><tr><th>Date</th><th class="num">≈ SEK</th></tr></thead>
+  <tbody>
+    ${dailyRows.map(([date, sek]) => `
+    <tr>
+      <td>${esc(date)}</td>
+      <td class="num">${fmt(sek)}</td>
+    </tr>`).join('')}
+    <tr class="total">
+      <td>Total</td>
+      <td class="num">${fmt(totalSek)}</td>
+    </tr>
+  </tbody>
+</table>
+
+<script>window.print();<\/script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 function clearSelection() {
