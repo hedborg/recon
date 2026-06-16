@@ -32,6 +32,7 @@ const CG_IDS = {
   ATOM:  'cosmos',        UNI:   'uniswap',        DOGE:  'dogecoin',
   TRX:   'tron',          ETC:   'ethereum-classic', XLM:  'stellar',
   FIL:   'filecoin',      VET:   'vechain',          TON:  'the-open-network',
+  LNX:   'bitcoin',      // Bitfinex Lightning Network BTC — 1:1 with BTC
 };
 
 // Memory cache: "COIN:YYYY-MM-DD" → rate (only positive values stored)
