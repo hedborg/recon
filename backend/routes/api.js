@@ -284,7 +284,7 @@ router.post('/automatch', async (req, res) => {
     await client.query('BEGIN');
 
     for (const fn of fnRows) {
-      const fnSek  = parseFloat(fn.kredit);
+      const fnSek  = parseFloat(fn.kredit) * -1;  // kredit is positive in Fortnox; negate to match negative statement withdrawals
       const fnDate = toDateStr(fn.bokforingsdatum);
       if (!fnDate) { skipped++; continue; }  // skip rows with no booking date
 
@@ -323,8 +323,8 @@ router.post('/automatch', async (req, res) => {
       const dateMin = addDaysStr(fnDate, -2);
       const dateMax = addDaysStr(fnDate,  2);
       if (!dateMin || !dateMax) { skipped++; continue; }
-      const sekMin  = fnSek * 0.90;
-      const sekMax  = fnSek * 1.10;
+      const sekMin  = fnSek * 1.10;  // fnSek is negative, so min is more negative
+      const sekMax  = fnSek * 0.90;
 
       // Candidates in date window (cheap pre-filter, no FX needed yet)
       const candidates = stRows.filter(s => {
@@ -348,14 +348,14 @@ router.post('/automatch', async (req, res) => {
 
       if (inRange.length === 1) {
         const st   = inRange[0];
-        const diff = Math.abs(fnSek - st._stSek) / fnSek * 100;
+        const diff = Math.abs(fnSek - st._stSek) / Math.abs(fnSek) * 100;
         await client.query(`
           INSERT INTO recon_matches
             (fortnox_id, statement_id, match_type, fx_rate_used, notes, matched_by)
           VALUES ($1,$2,'auto',$3,$4,'automatch')
         `, [fn.id, st.id,
             st._fxRate.toFixed(6),
-            `Auto range: ${Math.abs(parseFloat(st.amount)).toFixed(4)} ${st.currency} × ${st._fxRate.toFixed(4)} = ${st._stSek.toFixed(2)} SEK vs ${fnSek.toFixed(2)} SEK (${diff.toFixed(2)}%)`]);
+            `Auto range: ${parseFloat(st.amount).toFixed(4)} ${st.currency} × ${st._fxRate.toFixed(4)} = ${st._stSek.toFixed(2)} SEK vs ${fnSek.toFixed(2)} SEK (${diff.toFixed(2)}%)`]);
         usedStIds.add(st.id);
         rangeMatched++;
       } else {
@@ -413,17 +413,20 @@ router.post('/automatch/tight', async (req, res) => {
     await client.query('BEGIN');
 
     for (const fn of fnRows) {
-      const fnSek  = parseFloat(fn.kredit);
+      const fnSek  = parseFloat(fn.kredit) * -1;  // negate to match negative statement withdrawals
       const fnDate = toDateStr(fn.bokforingsdatum);
       if (!fnDate) { skipped++; continue; }
 
-      const sekMin = fnSek * 0.95;
-      const sekMax = fnSek * 1.05;
+      const sekMin  = fnSek * 1.05;  // fnSek is negative, so min is more negative
+      const sekMax  = fnSek * 0.95;
+      const dateMin = addDaysStr(fnDate, -1);
+      const dateMax = addDaysStr(fnDate,  1);
 
-      // Candidates on exact same date only
+      // Candidates within ±1 day
       const candidates = stRows.filter(s => {
         if (usedStIds.has(s.id)) return false;
-        return toDateStr(s.date) === fnDate;
+        const d = toDateStr(s.date);
+        return d && d >= dateMin && d <= dateMax;
       });
 
       const inRange = [];
@@ -438,14 +441,14 @@ router.post('/automatch/tight', async (req, res) => {
 
       if (inRange.length === 1) {
         const st   = inRange[0];
-        const diff = Math.abs(fnSek - st._stSek) / fnSek * 100;
+        const diff = Math.abs(fnSek - st._stSek) / Math.abs(fnSek) * 100;
         await client.query(`
           INSERT INTO recon_matches
             (fortnox_id, statement_id, match_type, fx_rate_used, notes, matched_by)
           VALUES ($1,$2,'auto',$3,$4,'automatch-tight')
         `, [fn.id, st.id,
             st._fxRate.toFixed(6),
-            `Tight: ${Math.abs(parseFloat(st.amount)).toFixed(4)} ${st.currency} × ${st._fxRate.toFixed(4)} = ${st._stSek.toFixed(2)} SEK vs ${fnSek.toFixed(2)} SEK (${diff.toFixed(2)}%)`]);
+            `Tight: ${parseFloat(st.amount).toFixed(4)} ${st.currency} × ${st._fxRate.toFixed(4)} = ${st._stSek.toFixed(2)} SEK vs ${fnSek.toFixed(2)} SEK (${diff.toFixed(2)}%)`]);
         usedStIds.add(st.id);
         matched++;
       } else {

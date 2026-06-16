@@ -899,7 +899,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-automatch-tight').addEventListener('click', async () => {
     const btn = document.getElementById('btn-automatch-tight');
     const status = document.getElementById('automatch-status');
-    if (!confirm(`Run Tight auto-match for account ${activeAccount}?\n\nMatches only rows with exact same date and ≤5% SEK difference.`)) return;
+    if (!confirm(`Run Tight auto-match for account ${activeAccount}?\n\nMatches rows within ±1 day and ≤5% SEK difference.`)) return;
     btn.disabled = true;
     status.textContent = 'Running…';
     try {
