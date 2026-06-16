@@ -178,6 +178,8 @@ async function migrate() {
     [1979, 'Bitwage balance account'],
     [1580, 'Hot Wallet'],
     [1613, 'Marketing Wallet'],
+    [6042, 'Transaction Costs'],
+    [6570, 'Banking Costs'],
   ];
   for (const [num, name] of seedAccounts) {
     await pool.query(`
