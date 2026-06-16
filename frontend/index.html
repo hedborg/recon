@@ -1717,6 +1717,9 @@ async function saveStatementField(id, fields, tdEl) {
       body: JSON.stringify(fields),
     });
     if (!res.ok) throw new Error();
+    // Update bnRows in memory so re-renders use the new value
+    const row = bnRows.find(r => r.id === id);
+    if (row) Object.assign(row, fields);
     tdEl.classList.remove('save-err');
     tdEl.classList.add('save-ok');
     setTimeout(() => tdEl.classList.remove('save-ok'), 800);
