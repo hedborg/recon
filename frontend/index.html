@@ -728,6 +728,10 @@
           <select id="sf-currency" class="sf-select">
             <option value="">All</option>
           </select>
+          <span class="sf-label" style="margin-left:8px">Contra Acct</span>
+          <select id="sf-contra" class="sf-select" style="min-width:160px">
+            <option value="">All</option>
+          </select>
           <button class="btn-filter" id="btn-clear-stmt-filters" style="margin-left:auto">Clear</button>
         </div>
         <div class="stmt-filter-row">
@@ -858,14 +862,14 @@ document.addEventListener('DOMContentLoaded', () => {
   );
 
   // Statement-panel filters — instant, client-side only
-  ['sf-type','sf-currency'].forEach(id =>
+  ['sf-type','sf-currency','sf-contra'].forEach(id =>
     document.getElementById(id).addEventListener('change', () => renderStatements(bnRows))
   );
   ['sf-amt-from','sf-amt-to','sf-sek-from','sf-sek-to'].forEach(id =>
     document.getElementById(id).addEventListener('input', () => renderStatements(bnRows))
   );
   document.getElementById('btn-clear-stmt-filters').addEventListener('click', () => {
-    ['sf-type','sf-currency'].forEach(id => document.getElementById(id).selectedIndex = 0);
+    ['sf-type','sf-currency','sf-contra'].forEach(id => document.getElementById(id).selectedIndex = 0);
     ['sf-amt-from','sf-amt-to','sf-sek-from','sf-sek-to'].forEach(id => document.getElementById(id).value = '');
     renderStatements(bnRows);
   });
@@ -1060,7 +1064,7 @@ async function loadAccountSwitcher() {
       btn.addEventListener('click', () => {
         activeAccount = btn.dataset.account;
         sw.querySelectorAll('.acct-btn').forEach(b => b.classList.toggle('active', b === btn));
-        ['sf-type','sf-currency'].forEach(id => document.getElementById(id).selectedIndex = 0);
+        ['sf-type','sf-currency','sf-contra'].forEach(id => document.getElementById(id).selectedIndex = 0);
         ['sf-amt-from','sf-amt-to','sf-sek-from','sf-sek-to'].forEach(id => document.getElementById(id).value = '');
         loadOperations();
         loadCurrencies();
@@ -1102,6 +1106,11 @@ function updateShowAllUI() {
 async function loadChartOfAccounts() {
   try {
     chartOfAccounts = await fetch('/api/chart-of-accounts').then(r => r.json());
+    const sel = document.getElementById('sf-contra');
+    sel.innerHTML = '<option value="">All</option>' +
+      chartOfAccounts.map(a =>
+        `<option value="${a.account_number}">${a.account_number} ${esc(a.account_name)}</option>`
+      ).join('');
   } catch(_) {}
 }
 
@@ -1223,6 +1232,7 @@ function renderStatements(rows) {
   // Apply client-side filters from statement panel
   const sfType     = document.getElementById('sf-type')?.value     || '';
   const sfCurrency = document.getElementById('sf-currency')?.value || '';
+  const sfContra   = document.getElementById('sf-contra')?.value   || '';
   const sfAmtFrom  = document.getElementById('sf-amt-from')?.value;
   const sfAmtTo    = document.getElementById('sf-amt-to')?.value;
   const sfSekFrom  = document.getElementById('sf-sek-from')?.value;
@@ -1230,6 +1240,7 @@ function renderStatements(rows) {
 
   if (sfType)     annotated = annotated.filter(r => r.type === sfType);
   if (sfCurrency) annotated = annotated.filter(r => r.currency === sfCurrency);
+  if (sfContra)   annotated = annotated.filter(r => String(r.contra_account) === sfContra);
   if (sfAmtFrom)  annotated = annotated.filter(r => Math.abs(parseFloat(r.amount)) >= parseFloat(sfAmtFrom));
   if (sfAmtTo)    annotated = annotated.filter(r => Math.abs(parseFloat(r.amount)) <= parseFloat(sfAmtTo));
   if (sfSekFrom)  annotated = annotated.filter(r => r._sek != null && Math.abs(r._sek) >= parseFloat(sfSekFrom));
