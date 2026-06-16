@@ -15,12 +15,13 @@ router.get('/unmatched/fortnox', async (req, res) => {
       SELECT f.id, f.vernr, f.bokforingsdatum, f.konto,
              f.verifikationstext, f.transaktionsinfo,
              f.debet, f.kredit, f.project_currency,
-             EXISTS(SELECT 1 FROM recon_matches m WHERE m.fortnox_id = f.id) AS is_matched
+             (m.fortnox_id IS NOT NULL) AS is_matched
       FROM stg_fortnox f
+      LEFT JOIN (SELECT DISTINCT fortnox_id FROM recon_matches) m ON m.fortnox_id = f.id
       WHERE f.konto = $1
         AND ($2::date IS NULL OR f.bokforingsdatum >= $2::date)
         AND ($3::date IS NULL OR f.bokforingsdatum <= $3::date)
-        AND ($4 OR NOT EXISTS(SELECT 1 FROM recon_matches m WHERE m.fortnox_id = f.id))
+        AND ($4 OR m.fortnox_id IS NULL)
       ORDER BY f.bokforingsdatum DESC, f.vernr
     `, [account, from || null, to || null, showAll]);
     res.json(rows);
@@ -40,12 +41,13 @@ router.get('/unmatched/statements', async (req, res) => {
       SELECT s.id, s.date, s.source, s.account, s.type, s.subtype,
              s.currency, s.amount, s.fee, s.transaction_id, s.remark,
              s.contra_account, s.voucher_text,
-             EXISTS(SELECT 1 FROM recon_matches m WHERE m.statement_id = s.id) AS is_matched
+             (m.statement_id IS NOT NULL) AS is_matched
       FROM stg_statements s
+      LEFT JOIN (SELECT DISTINCT statement_id FROM recon_matches) m ON m.statement_id = s.id
       WHERE s.account = $1
         AND ($2::date IS NULL OR DATE(s.date) >= $2::date)
         AND ($3::date IS NULL OR DATE(s.date) <= $3::date)
-        AND ($4 OR NOT EXISTS(SELECT 1 FROM recon_matches m WHERE m.statement_id = s.id))
+        AND ($4 OR m.statement_id IS NULL)
       ORDER BY s.date DESC
     `, [account, from || null, to || null, showAll]);
     res.json(rows);
