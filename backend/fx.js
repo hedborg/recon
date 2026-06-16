@@ -31,7 +31,7 @@ const CG_IDS = {
   LTC:   'litecoin',      BCH:   'bitcoin-cash',   AVAX:  'avalanche-2',
   ATOM:  'cosmos',        UNI:   'uniswap',        DOGE:  'dogecoin',
   TRX:   'tron',          ETC:   'ethereum-classic', XLM:  'stellar',
-  FIL:   'filecoin',      VET:   'vechain',
+  FIL:   'filecoin',      VET:   'vechain',          TON:  'the-open-network',
 };
 
 // Memory cache: "COIN:YYYY-MM-DD" → rate (only positive values stored)
