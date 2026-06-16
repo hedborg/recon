@@ -583,6 +583,10 @@
       Import Kraken
       <input type="file" id="kr-file" accept=".csv">
     </label>
+    <label title="UTF-8 CSV export from Bitfinex (account 1975)">
+      Import Bitfinex
+      <input type="file" id="bf-file" accept=".csv">
+    </label>
     <span id="import-status"></span>
   </div>
 
@@ -826,6 +830,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupImport('fn-file', '/import/fortnox');
   setupImport('bn-file', '/import/binance');
   setupImport('kr-file', '/import/kraken');
+  setupImport('bf-file', '/import/bitfinex');
   document.getElementById('btn-confirm').addEventListener('click', confirmMatch);
   document.getElementById('btn-explain-fn').addEventListener('click', explainFortnox);
   document.getElementById('btn-explain-bn').addEventListener('click', explainBinance);

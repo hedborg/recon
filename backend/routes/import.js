@@ -242,6 +242,73 @@ router.post('/kraken', upload.single('file'), async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Bitfinex import  (UTF-8 CSV)
+// Columns: #, DESCRIPTION, CURRENCY, AMOUNT, BALANCE, DATE, WALLET
+// Date format: DD-MM-YY HH:MM:SS
+// Maps to stg_statements with source='Bitfinex', account='1975'
+// ---------------------------------------------------------------------------
+router.post('/bitfinex', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  try {
+    const text = req.file.buffer.toString('utf8');
+    const records = parse(text, { columns: true, skip_empty_lines: true, trim: true, bom: true });
+
+    const valueBatch = [];
+    let skipped = 0;
+
+    for (const r of records) {
+      const txid     = r['#'] || null;
+      const desc     = r['DESCRIPTION'] || r['description'] || '';
+      const currency = r['CURRENCY'] || r['currency'] || null;
+      const amount   = parseFloat(r['AMOUNT'] || r['amount'] || '0') || 0;
+      const rawDate  = r['DATE'] || r['date'] || null;
+      const wallet   = r['WALLET'] || r['wallet'] || null;
+
+      const date = parseBitfinexDate(rawDate);
+      if (!date || !currency) { skipped++; continue; }
+
+      // Extract type from start of description (e.g. "Deposit (LNX) #..." → "Deposit")
+      const typeMatch = desc.match(/^([A-Za-z ]+?)(?:\s*[\(#]|$)/);
+      const type = typeMatch ? typeMatch[1].trim() : desc.slice(0, 40);
+
+      valueBatch.push([txid, date, type, currency, amount, wallet, desc]);
+    }
+
+    const client = await pool.connect();
+    let inserted = 0;
+
+    try {
+      // Dedup by transaction_id
+      const { rows: existingTxRows } = await client.query(
+        `SELECT transaction_id FROM stg_statements WHERE source = 'Bitfinex' AND transaction_id IS NOT NULL`
+      );
+      const existingTxIds = new Set(existingTxRows.map(r => r.transaction_id));
+
+      await client.query('BEGIN');
+      for (const [txid, date, type, currency, amount, wallet, desc] of valueBatch) {
+        if (txid && existingTxIds.has(txid)) { skipped++; continue; }
+        await client.query(
+          `INSERT INTO stg_statements (source, account, date, type, subtype, currency, amount, transaction_id, remark)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          ['Bitfinex', '1975', date, type, wallet, currency, amount, txid, desc]
+        );
+        inserted++;
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK'); throw err;
+    } finally { client.release(); }
+
+    const matched = await runAutoMatch('1975');
+    res.json({ inserted, skipped, auto_matched: matched });
+  } catch (err) {
+    console.error('Bitfinex import error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Auto-matching
 // Matches unmatched Fortnox kredit lines for a given konto against unmatched
 // statement rows for the same account, using FX conversion to SEK.
@@ -349,6 +416,15 @@ function parseBinanceTime(s) {
     return '20' + s.replace(' ', 'T') + 'Z';
   }
   return s;
+}
+
+function parseBitfinexDate(s) {
+  if (!s) return null;
+  // Format: DD-MM-YY HH:MM:SS  e.g. "01-06-26 05:19:59"
+  const m = s.trim().match(/^(\d{2})-(\d{2})-(\d{2}) (\d{2}:\d{2}:\d{2})$/);
+  if (!m) return null;
+  const [, dd, mm, yy, time] = m;
+  return `20${yy}-${mm}-${dd}T${time}Z`;
 }
 
 function parseSwedishDate(s) {
