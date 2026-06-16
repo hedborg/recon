@@ -667,10 +667,15 @@
         <h2 id="fn-panel-title">Unmatched Fortnox</h2>
         <span class="badge" id="fn-count">0</span>
         <span class="total-sek" id="fn-total"></span>
+        <button class="btn-filter" id="btn-automatch-tight"
+                style="margin-left:10px;border-color:#34d399;color:#34d399;"
+                title="Tight: exact date + ≤5% SEK difference">
+          ⚡ Tight
+        </button>
         <button class="btn-filter" id="btn-automatch"
-                style="margin-left:10px;border-color:var(--text-accent);color:var(--text-accent);"
-                title="Auto-match all rows where the smart filter yields exactly 1 result">
-          ⚡ Auto-match All
+                style="margin-left:4px;border-color:var(--text-accent);color:var(--text-accent);"
+                title="Wide: ±2 days date window + ±10% SEK difference">
+          ⚡ Wide
         </button>
         <span id="automatch-status" style="font-size:11px;color:var(--text-accent);margin-left:6px;"></span>
         <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Click rows to select</span>
@@ -890,7 +895,35 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('th-fn-date').classList.add('desc');
   document.getElementById('th-bn-time').classList.add('desc');
 
-  // Auto-match button
+  // Tight auto-match button
+  document.getElementById('btn-automatch-tight').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-automatch-tight');
+    const status = document.getElementById('automatch-status');
+    if (!confirm(`Run Tight auto-match for account ${activeAccount}?\n\nMatches only rows with exact same date and ≤5% SEK difference.`)) return;
+    btn.disabled = true;
+    status.textContent = 'Running…';
+    try {
+      const r = await fetch('/api/automatch/tight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account: activeAccount,
+          from: filterFrom || undefined,
+          to:   filterTo   || undefined,
+        }),
+      }).then(r => r.json());
+      if (r.error) throw new Error(r.error);
+      status.textContent = `✓ ${r.matched} matched, ${r.skipped} skipped`;
+      toast(`Tight auto-matched ${r.matched} rows`);
+      refresh();
+    } catch(e) {
+      status.textContent = `✗ ${e.message}`;
+    }
+    btn.disabled = false;
+    setTimeout(() => { status.textContent = ''; }, 8000);
+  });
+
+  // Wide auto-match button
   document.getElementById('btn-automatch').addEventListener('click', async () => {
     const btn = document.getElementById('btn-automatch');
     const status = document.getElementById('automatch-status');

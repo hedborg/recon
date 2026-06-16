@@ -379,6 +379,91 @@ router.post('/automatch', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// POST /api/automatch/tight — exact date + ≤5% SEK difference
+// ---------------------------------------------------------------------------
+router.post('/automatch/tight', async (req, res) => {
+  const { account = '1971', from, to } = req.body;
+  const client = await pool.connect();
+  let matched = 0, skipped = 0;
+
+  try {
+    const { rows: fnRows } = await pool.query(`
+      SELECT f.id, f.bokforingsdatum, f.kredit, f.vernr,
+             f.verifikationstext, f.transaktionsinfo
+      FROM stg_fortnox f
+      WHERE f.konto = $1
+        AND f.kredit > 0
+        AND NOT EXISTS (SELECT 1 FROM recon_matches m WHERE m.fortnox_id = f.id)
+        AND ($2::date IS NULL OR f.bokforingsdatum >= $2::date)
+        AND ($3::date IS NULL OR f.bokforingsdatum <= $3::date)
+      ORDER BY f.bokforingsdatum
+    `, [account, from || null, to || null]);
+
+    const { rows: stRows } = await pool.query(`
+      SELECT s.id, s.date, s.currency, s.amount, s.remark, s.transaction_id
+      FROM stg_statements s
+      WHERE s.account = $1
+        AND NOT EXISTS (SELECT 1 FROM recon_matches m WHERE m.statement_id = s.id)
+        AND ($2::date IS NULL OR DATE(s.date) >= $2::date)
+        AND ($3::date IS NULL OR DATE(s.date) <= $3::date)
+    `, [account, from || null, to || null]);
+
+    const usedStIds = new Set();
+    await client.query('BEGIN');
+
+    for (const fn of fnRows) {
+      const fnSek  = parseFloat(fn.kredit);
+      const fnDate = toDateStr(fn.bokforingsdatum);
+      if (!fnDate) { skipped++; continue; }
+
+      const sekMin = fnSek * 0.95;
+      const sekMax = fnSek * 1.05;
+
+      // Candidates on exact same date only
+      const candidates = stRows.filter(s => {
+        if (usedStIds.has(s.id)) return false;
+        return toDateStr(s.date) === fnDate;
+      });
+
+      const inRange = [];
+      for (const st of candidates) {
+        const fxRate = await getRateSek(st.currency, fnDate);
+        if (!fxRate) continue;
+        const stSek = parseFloat(st.amount) * fxRate;
+        if (stSek >= sekMin && stSek <= sekMax) {
+          inRange.push({ ...st, _fxRate: fxRate, _stSek: stSek });
+        }
+      }
+
+      if (inRange.length === 1) {
+        const st   = inRange[0];
+        const diff = Math.abs(fnSek - st._stSek) / fnSek * 100;
+        await client.query(`
+          INSERT INTO recon_matches
+            (fortnox_id, statement_id, match_type, fx_rate_used, notes, matched_by)
+          VALUES ($1,$2,'auto',$3,$4,'automatch-tight')
+        `, [fn.id, st.id,
+            st._fxRate.toFixed(6),
+            `Tight: ${Math.abs(parseFloat(st.amount)).toFixed(4)} ${st.currency} × ${st._fxRate.toFixed(4)} = ${st._stSek.toFixed(2)} SEK vs ${fnSek.toFixed(2)} SEK (${diff.toFixed(2)}%)`]);
+        usedStIds.add(st.id);
+        matched++;
+      } else {
+        skipped++;
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ matched, skipped });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Tight automatch error:', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 function addDaysStr(dateStr, n) {
   if (!dateStr) return null;
   const d = new Date(dateStr + 'T00:00:00Z');
