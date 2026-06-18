@@ -591,6 +591,10 @@
       Import Sec Ops
       <input type="file" id="so-file" accept=".csv">
     </label>
+    <label title="CSV export from Operational Wallet BTC (account 1963) — rows before 2026-01-01 are skipped">
+      Import Operational
+      <input type="file" id="op-file" accept=".csv">
+    </label>
     <span id="import-status"></span>
   </div>
 
@@ -841,6 +845,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupImport('kr-file', '/import/kraken');
   setupImport('bf-file', '/import/bitfinex');
   setupImport('so-file', '/import/secops');
+  setupImport('op-file', '/import/operational');
   document.getElementById('btn-confirm').addEventListener('click', confirmMatch);
   document.getElementById('btn-explain-fn').addEventListener('click', explainFortnox);
   document.getElementById('btn-explain-bn').addEventListener('click', explainBinance);
