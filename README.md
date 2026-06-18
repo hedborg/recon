@@ -54,6 +54,27 @@ On every import, the backend attempts to auto-match:
 - **Criterion**: `SUM(abs(change)) × implied_rate` within 2% of the SEK kredit amount
 - The implied FX rate (SEK/USDT) is stored on each match record
 
+## Production (DigitalOcean Droplet)
+
+The app runs on a DigitalOcean droplet via Docker Compose at `/opt/recon`.
+
+**Deploy an update:**
+```bash
+cd /opt/recon && git pull && docker compose up -d --build
+```
+
+**View logs:**
+```bash
+docker compose logs -f app
+```
+
+**Check running containers:**
+```bash
+docker compose ps
+```
+
+The droplet does not use pm2 — the Node process is managed by Docker Compose directly.
+
 ## Redshift migration
 
 Change the environment variables to point at your Redshift cluster.  
