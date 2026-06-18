@@ -360,7 +360,7 @@ router.post('/secops', upload.single('file'), async (req, res) => {
         await client.query(
           `INSERT INTO stg_statements (source, account, date, type, currency, amount, transaction_id, remark)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          ['SecOps', '1976', date, 'Transaction', 'BTC', amount, txid, label]
+          ['SecOps', '1976', date, amount >= 0 ? 'Deposit' : 'Withdrawal', 'BTC', amount, txid, label]
         );
         inserted++;
       }
@@ -423,7 +423,7 @@ router.post('/operational', upload.single('file'), async (req, res) => {
         await client.query(
           `INSERT INTO stg_statements (source, account, date, type, currency, amount, transaction_id, remark)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          ['Operational', '1963', date, 'Transaction', 'BTC', amount, txid, label]
+          ['Operational', '1963', date, amount >= 0 ? 'Deposit' : 'Withdrawal', 'BTC', amount, txid, label]
         );
         inserted++;
       }
