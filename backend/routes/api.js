@@ -561,4 +561,72 @@ router.get('/debug/fortnox', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/revaluation?month=2026-05
+// For each account+currency, returns:
+//   sek_at_tx   — sum of amount × fx_rate on transaction date
+//   sek_at_eom  — sum of amount × fx_rate at month-end
+//   reval_diff  — sek_at_eom - sek_at_tx
+// ---------------------------------------------------------------------------
+router.get('/revaluation', async (req, res) => {
+  const { month } = req.query;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'month parameter required (YYYY-MM)' });
+  }
+
+  const [year, mon] = month.split('-').map(Number);
+  const firstDay = `${month}-01`;
+  // Last day of the month
+  const lastDay = new Date(year, mon, 0).toISOString().slice(0, 10);
+
+  try {
+    const { rows } = await pool.query(`
+      WITH tx AS (
+        SELECT
+          s.account,
+          s.currency,
+          s.amount::numeric                        AS amount,
+          COALESCE(f.rate_sek, 1)                  AS tx_rate
+        FROM stg_statements s
+        LEFT JOIN fx_rates f
+          ON f.coin = s.currency
+         AND f.rate_date = DATE(s.date)
+        WHERE DATE(s.date) >= $1::date
+          AND DATE(s.date) <= $2::date
+      ),
+      eom AS (
+        SELECT coin, rate_sek AS eom_rate
+        FROM fx_rates
+        WHERE rate_date = $2::date
+      ),
+      agg AS (
+        SELECT
+          tx.account,
+          tx.currency,
+          SUM(tx.amount)                           AS net_amount,
+          SUM(tx.amount * tx.tx_rate)              AS sek_at_tx,
+          MAX(eom.eom_rate)                        AS eom_rate
+        FROM tx
+        LEFT JOIN eom ON eom.coin = tx.currency
+        GROUP BY tx.account, tx.currency
+      )
+      SELECT
+        agg.account,
+        agg.currency,
+        agg.net_amount::float,
+        agg.sek_at_tx::float,
+        COALESCE(agg.eom_rate, 1)::float           AS eom_rate,
+        (agg.net_amount * COALESCE(agg.eom_rate, 1))::float AS sek_at_eom,
+        (agg.net_amount * COALESCE(agg.eom_rate, 1) - agg.sek_at_tx)::float AS reval_diff
+      FROM agg
+      ORDER BY agg.account, ABS(agg.sek_at_tx) DESC
+    `, [firstDay, lastDay]);
+
+    res.json({ month, last_day: lastDay, rows });
+  } catch (err) {
+    console.error('Revaluation error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -122,6 +122,16 @@
   .import-col input[type=file] { display: none; }
   #import-status { font-size: 11px; color: var(--text-import-status); min-width: 160px; align-self: center; }
 
+  /* ── Revaluation table ──────────────────────────────────────────── */
+  .reval-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .reval-table th { background: var(--bg-th); color: var(--text-th); padding: 5px 8px; text-align: left; border-bottom: 2px solid var(--border); font-size: 11px; }
+  .reval-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--text-body); }
+  .reval-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .reval-table .pos { color: #34d399; }
+  .reval-table .neg { color: #f87171; }
+  .reval-table .subtotal td { background: var(--bg-input); font-weight: 600; }
+  .reval-table .grand-total td { background: var(--bg-th); font-weight: 700; }
+
   /* ── Account switcher ───────────────────────────────────────────── */
   .acct-btn {
     padding: 4px 10px;
@@ -645,6 +655,7 @@
 <div class="tab-bar">
   <button class="tab-btn active" data-tab="recon">📊 Reconciliation</button>
   <button class="tab-btn"        data-tab="fx">📈 FX Rates</button>
+  <button class="tab-btn"        data-tab="reval">📉 FX Revaluation</button>
 </div>
 
 <div class="main">
@@ -688,6 +699,19 @@
     </div>
   </div>
 
+</div>
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<!-- ══════════════════════ FX REVALUATION TAB ══════════════════════ -->
+<div class="tab-content" id="tab-reval" style="padding:16px;overflow:auto;">
+  <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;">
+    <label style="font-size:11px;color:var(--text-th)">Month:</label>
+    <input type="month" id="reval-month" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:11px;">
+    <button class="btn-filter" id="btn-reval-run">Run</button>
+    <button class="btn-filter" id="btn-reval-pdf" style="display:none">↓ PDF</button>
+    <span id="reval-status" style="font-size:11px;color:var(--text-muted);"></span>
+  </div>
+  <div id="reval-table-wrap"></div>
 </div>
 <!-- ═══════════════════════════════════════════════════════════════ -->
 
@@ -1927,6 +1951,162 @@ function clearSelection() {
     '<div class="detail-empty">Click any matched row (✓) on either side to view match details here.</div>';
   renderStatements(bnRows);
   renderTotals(fnRows, bnRows);
+}
+
+// ── FX Revaluation ────────────────────────────────────────────────
+let revalData = null;
+
+(function initReval() {
+  // Default to previous month
+  const d = new Date();
+  d.setDate(1); d.setMonth(d.getMonth() - 1);
+  document.getElementById('reval-month').value =
+    d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+})();
+
+document.getElementById('btn-reval-run').addEventListener('click', async () => {
+  const month = document.getElementById('reval-month').value;
+  if (!month) return;
+  document.getElementById('reval-status').textContent = 'Loading…';
+  document.getElementById('btn-reval-pdf').style.display = 'none';
+  try {
+    const data = await fetch(`/api/revaluation?month=${month}`).then(r => r.json());
+    if (data.error) throw new Error(data.error);
+    revalData = data;
+    renderRevalTable(data);
+    document.getElementById('reval-status').textContent = `${data.rows.length} rows — month-end rate: ${data.last_day}`;
+    document.getElementById('btn-reval-pdf').style.display = '';
+  } catch (e) {
+    document.getElementById('reval-status').textContent = 'Error: ' + e.message;
+  }
+});
+
+document.getElementById('btn-reval-pdf').addEventListener('click', exportRevalPDF);
+
+function renderRevalTable(data) {
+  const fmt  = n => new Intl.NumberFormat('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  const fmt8 = n => new Intl.NumberFormat('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 8 }).format(n);
+
+  // Group by account for subtotals
+  const byAccount = {};
+  for (const r of data.rows) {
+    (byAccount[r.account] = byAccount[r.account] || []).push(r);
+  }
+
+  let html = `<table class="reval-table">
+    <thead><tr>
+      <th>Account</th><th>Currency</th>
+      <th class="num">Net Amount</th>
+      <th class="num">Month-end Rate</th>
+      <th class="num">SEK at Transaction</th>
+      <th class="num">SEK at Month-end</th>
+      <th class="num">Revaluation Diff</th>
+    </tr></thead><tbody>`;
+
+  let grandSekTx = 0, grandSekEom = 0, grandDiff = 0;
+
+  for (const [account, rows] of Object.entries(byAccount)) {
+    let subTx = 0, subEom = 0, subDiff = 0;
+    for (const r of rows) {
+      html += `<tr>
+        <td>${esc(r.account)}</td>
+        <td>${esc(r.currency)}</td>
+        <td class="num">${fmt8(r.net_amount)}</td>
+        <td class="num">${fmt8(r.eom_rate)}</td>
+        <td class="num">${fmt(r.sek_at_tx)}</td>
+        <td class="num">${fmt(r.sek_at_eom)}</td>
+        <td class="num ${r.reval_diff >= 0 ? 'pos' : 'neg'}">${fmt(r.reval_diff)}</td>
+      </tr>`;
+      subTx += r.sek_at_tx; subEom += r.sek_at_eom; subDiff += r.reval_diff;
+    }
+    html += `<tr class="subtotal">
+      <td colspan="4">${esc(account)} subtotal</td>
+      <td class="num">${fmt(subTx)}</td>
+      <td class="num">${fmt(subEom)}</td>
+      <td class="num ${subDiff >= 0 ? 'pos' : 'neg'}">${fmt(subDiff)}</td>
+    </tr>`;
+    grandSekTx += subTx; grandSekEom += subEom; grandDiff += subDiff;
+  }
+
+  html += `<tr class="grand-total">
+    <td colspan="4">Grand Total</td>
+    <td class="num">${fmt(grandSekTx)}</td>
+    <td class="num">${fmt(grandSekEom)}</td>
+    <td class="num ${grandDiff >= 0 ? 'pos' : 'neg'}">${fmt(grandDiff)}</td>
+  </tr></tbody></table>`;
+
+  document.getElementById('reval-table-wrap').innerHTML = html;
+}
+
+function exportRevalPDF() {
+  if (!revalData) return;
+  const fmt  = n => new Intl.NumberFormat('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  const fmt8 = n => new Intl.NumberFormat('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 8 }).format(n);
+  const byAccount = {};
+  for (const r of revalData.rows) (byAccount[r.account] = byAccount[r.account] || []).push(r);
+
+  let grandSekTx = 0, grandSekEom = 0, grandDiff = 0;
+  let bodyRows = '';
+
+  for (const [account, rows] of Object.entries(byAccount)) {
+    let subTx = 0, subEom = 0, subDiff = 0;
+    for (const r of rows) {
+      bodyRows += `<tr>
+        <td>${esc(r.account)}</td><td>${esc(r.currency)}</td>
+        <td class="num">${fmt8(r.net_amount)}</td>
+        <td class="num">${fmt8(r.eom_rate)}</td>
+        <td class="num">${fmt(r.sek_at_tx)}</td>
+        <td class="num">${fmt(r.sek_at_eom)}</td>
+        <td class="num">${fmt(r.reval_diff)}</td>
+      </tr>`;
+      subTx += r.sek_at_tx; subEom += r.sek_at_eom; subDiff += r.reval_diff;
+    }
+    bodyRows += `<tr class="subtotal">
+      <td colspan="4"><strong>${esc(account)} subtotal</strong></td>
+      <td class="num"><strong>${fmt(subTx)}</strong></td>
+      <td class="num"><strong>${fmt(subEom)}</strong></td>
+      <td class="num"><strong>${fmt(subDiff)}</strong></td>
+    </tr>`;
+    grandSekTx += subTx; grandSekEom += subEom; grandDiff += subDiff;
+  }
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>FX Revaluation — ${revalData.month}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 11px; color: #111; padding: 32px; }
+  h1 { font-size: 16px; margin-bottom: 4px; }
+  .meta { color: #555; font-size: 10px; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #f0f0f0; text-align: left; padding: 4px 6px; font-size: 10px; border-bottom: 2px solid #ccc; }
+  td { padding: 3px 6px; border-bottom: 1px solid #e8e8e8; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .subtotal td { background: #f7f7f7; }
+  .grand-total td { background: #e8e8e8; font-weight: bold; }
+  @media print { button { display: none; } }
+</style></head><body>
+<h1>FX Revaluation — ${revalData.month}</h1>
+<div class="meta">Month-end date: ${revalData.last_day} &nbsp;|&nbsp; Generated: ${new Date().toISOString().slice(0,10)}</div>
+<table>
+  <thead><tr>
+    <th>Account</th><th>Currency</th><th class="num">Net Amount</th>
+    <th class="num">Month-end Rate</th><th class="num">SEK at Transaction</th>
+    <th class="num">SEK at Month-end</th><th class="num">Reval Diff</th>
+  </tr></thead>
+  <tbody>${bodyRows}
+  <tr class="grand-total">
+    <td colspan="4">Grand Total</td>
+    <td class="num">${fmt(grandSekTx)}</td>
+    <td class="num">${fmt(grandSekEom)}</td>
+    <td class="num">${fmt(grandDiff)}</td>
+  </tr></tbody>
+</table>
+<script>window.print();<\/script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 // ── Utilities ─────────────────────────────────────────────────────
