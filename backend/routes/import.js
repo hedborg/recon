@@ -309,6 +309,75 @@ router.post('/bitfinex', upload.single('file'), async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Sec Ops Wallet BTC import (account 1976)
+// CSV columns: oc_transaction_hash, ln_payment_hash, label, confirmations,
+//              amount_chain_bc, amount_lightning_bc, fiat_value,
+//              network_fee_satoshi, fiat_fee, timestamp
+// Only rows with timestamp >= 2026-01-01 are imported.
+// ---------------------------------------------------------------------------
+router.post('/secops', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  const CUTOFF = new Date('2026-01-01T00:00:00Z');
+
+  try {
+    const text = req.file.buffer.toString('utf8');
+    const records = parse(text, { columns: true, skip_empty_lines: true, trim: true, bom: true });
+
+    const valueBatch = [];
+    let skipped = 0;
+
+    for (const r of records) {
+      const rawDate = r['timestamp'] || r['Timestamp'] || null;
+      if (!rawDate) { skipped++; continue; }
+
+      const date = new Date(rawDate);
+      if (isNaN(date.getTime()) || date < CUTOFF) { skipped++; continue; }
+
+      const txid    = r['oc_transaction_hash'] || r['ln_payment_hash'] || null;
+      const label   = r['label'] || null;
+
+      // Combine on-chain and lightning amounts (one is always 0)
+      const chainAmt   = parseFloat(r['amount_chain_bc']     || '0') || 0;
+      const lnAmt      = parseFloat(r['amount_lightning_bc'] || '0') || 0;
+      const amount     = chainAmt + lnAmt;
+
+      valueBatch.push([txid, date, amount, label]);
+    }
+
+    const client = await pool.connect();
+    let inserted = 0;
+
+    try {
+      const { rows: existingTxRows } = await client.query(
+        `SELECT transaction_id FROM stg_statements WHERE source = 'SecOps' AND transaction_id IS NOT NULL`
+      );
+      const existingTxIds = new Set(existingTxRows.map(r => r.transaction_id));
+
+      await client.query('BEGIN');
+      for (const [txid, date, amount, label] of valueBatch) {
+        if (txid && existingTxIds.has(txid)) { skipped++; continue; }
+        await client.query(
+          `INSERT INTO stg_statements (source, account, date, type, currency, amount, transaction_id, remark)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          ['SecOps', '1976', date, 'Transaction', 'BTC', amount, txid, label]
+        );
+        inserted++;
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK'); throw err;
+    } finally { client.release(); }
+
+    const matched = await runAutoMatch('1976');
+    res.json({ inserted, skipped, auto_matched: matched });
+  } catch (err) {
+    console.error('SecOps import error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Auto-matching
 // Matches unmatched Fortnox kredit lines for a given konto against unmatched
 // statement rows for the same account, using FX conversion to SEK.
