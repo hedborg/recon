@@ -82,6 +82,17 @@ async function startRefresh() {
     WHERE NOT EXISTS (
       SELECT 1 FROM fx_rates f WHERE f.coin = s.currency AND f.rate_date = DATE(s.date)
     )
+    UNION
+    -- Month-end rates needed for FX revaluation report
+    SELECT DISTINCT
+      s.currency AS coin,
+      (DATE_TRUNC('month', s.date) + INTERVAL '1 month - 1 day')::date::text AS rate_date
+    FROM stg_statements s
+    WHERE NOT EXISTS (
+      SELECT 1 FROM fx_rates f
+      WHERE f.coin = s.currency
+        AND f.rate_date = (DATE_TRUNC('month', s.date) + INTERVAL '1 month - 1 day')::date
+    )
     ORDER BY coin, rate_date
   `);
 

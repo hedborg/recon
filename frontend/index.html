@@ -704,11 +704,13 @@
 
 <!-- ══════════════════════ FX REVALUATION TAB ══════════════════════ -->
 <div class="tab-content" id="tab-reval" style="padding:16px;overflow:auto;">
-  <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;">
-    <label style="font-size:11px;color:var(--text-th)">Month:</label>
-    <input type="month" id="reval-month" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:11px;">
-    <button class="btn-filter" id="btn-reval-run">Run</button>
-    <button class="btn-filter" id="btn-reval-pdf" style="display:none">↓ PDF</button>
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+    <div style="display:flex;gap:8px;align-items:center;">
+      <label style="font-size:11px;color:var(--text-th)">Month:</label>
+      <input type="month" id="reval-month" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:11px;">
+      <button class="btn-filter" id="btn-reval-run">Run</button>
+      <button class="btn-filter" id="btn-reval-pdf" style="display:none">↓ PDF</button>
+    </div>
     <span id="reval-status" style="font-size:11px;color:var(--text-muted);"></span>
   </div>
   <div id="reval-table-wrap"></div>
