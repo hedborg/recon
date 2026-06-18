@@ -299,6 +299,7 @@
 
   /* ── Match detail panel ──────────────────────────────────────── */
   #detail-panel { min-height: 80px; }
+  #detail-content { overflow-y: auto; flex: 1; }
   .detail-empty { padding: 16px; color: var(--text-muted); font-size: 12px; }
   .match-detail-card {
     padding: 12px 16px 10px;
@@ -1531,7 +1532,12 @@ function renderMatchDetail(matches, fnRow) {
     return;
   }
 
-  content.innerHTML = matches.map(m => `
+  const fortnoxId = matches[0]?.fortnox_id;
+  const unmatchAllBtn = matches.length > 1 && fortnoxId
+    ? `<button class="btn btn-cancel" id="btn-unmatch-all" data-fortnox-id="${fortnoxId}"
+         style="margin-bottom:8px;padding:3px 10px;font-size:11px">✕ Unmatch All (${matches.length} records)</button>`
+    : '';
+  content.innerHTML = unmatchAllBtn + matches.map(m => `
     <div class="match-detail-card">
       <div class="match-detail-header">
         <span class="match-type-${m.match_type}" style="font-weight:600;font-size:12px">${m.match_type}</span>
@@ -1572,6 +1578,22 @@ function renderMatchDetail(matches, fnRow) {
       }
     });
   });
+
+  const unmatchAllEl = content.querySelector('#btn-unmatch-all');
+  if (unmatchAllEl) {
+    unmatchAllEl.addEventListener('click', async () => {
+      if (!confirm('Remove all matches for this Fortnox row?')) return;
+      try {
+        const res = await fetch(`/api/matches/by-fortnox/${unmatchAllEl.dataset.fortnoxId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        toast('All matches removed');
+        clearSelection();
+        refresh();
+      } catch (err) {
+        toast('Unmatch failed: ' + err.message, true);
+      }
+    });
+  }
 }
 
 function addDays(dateStr, n) {

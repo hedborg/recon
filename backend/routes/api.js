@@ -525,6 +525,15 @@ router.delete('/matches/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+router.delete('/matches/by-fortnox/:fortnox_id', async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      'DELETE FROM recon_matches WHERE fortnox_id = $1', [req.params.fortnox_id]
+    );
+    res.json({ ok: true, deleted: rowCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.patch('/matches/:id', async (req, res) => {
   const { notes, fx_rate_used } = req.body;
   try {
