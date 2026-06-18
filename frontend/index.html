@@ -1814,7 +1814,7 @@ function exportStatements() {
       Currency:         r.currency   || '',
       Amount:           parseFloat(r.amount),
       Fee:              r.fee != null ? parseFloat(r.fee) : '',
-      'SEK (approx)':   r._sek != null ? parseFloat(Math.abs(r._sek).toFixed(2)) : '',
+      'SEK (approx)':   r._sek != null ? parseFloat(r._sek.toFixed(2)) : '',
       'Transaction ID': r.transaction_id || '',
       Remark:           r.remark     || '',
       Source:           r.source     || '',
