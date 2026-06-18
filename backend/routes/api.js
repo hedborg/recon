@@ -62,7 +62,7 @@ router.get('/unmatched/statements', async (req, res) => {
 router.get('/matches/by-fortnox/:id', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT m.id, m.match_type, m.fx_rate_used, m.notes, m.matched_by, m.matched_at,
+      SELECT m.id, m.fortnox_id, m.match_type, m.fx_rate_used, m.notes, m.matched_by, m.matched_at,
              s.id AS statement_id, s.date AS s_date, s.source, s.type AS s_type,
              s.subtype, s.currency, s.amount AS s_amount, s.fee,
              s.transaction_id, s.remark
