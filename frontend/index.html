@@ -104,8 +104,9 @@
   .stat { font-size: 11px; color: var(--text-muted); }
   .stat strong { color: var(--text-stat-strong); }
 
-  .import-area { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .import-area label {
+  .import-area { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+  .import-col { display: flex; flex-direction: column; gap: 3px; }
+  .import-col label {
     cursor: pointer;
     padding: 4px 10px;
     border-radius: 4px;
@@ -113,16 +114,17 @@
     background: var(--bg-input);
     color: var(--text-muted);
     font-size: 11px;
+    white-space: nowrap;
+    text-align: center;
     transition: border-color .15s, color .15s;
   }
-  .import-area label:hover { border-color: #6366f1; color: var(--text-header); }
-  .import-area input[type=file] { display: none; }
-  #import-status { font-size: 11px; color: var(--text-import-status); min-width: 160px; }
+  .import-col label:hover { border-color: #6366f1; color: var(--text-header); }
+  .import-col input[type=file] { display: none; }
+  #import-status { font-size: 11px; color: var(--text-import-status); min-width: 160px; align-self: center; }
 
   /* ── Account switcher ───────────────────────────────────────────── */
-  .account-switcher { display: flex; gap: 4px; align-items: center; }
   .acct-btn {
-    padding: 4px 12px;
+    padding: 4px 10px;
     border-radius: 4px;
     border: 1px solid var(--border);
     background: var(--bg-input);
@@ -130,6 +132,9 @@
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
+    white-space: pre;
+    text-align: center;
+    width: 100%;
     transition: all .15s;
   }
   .acct-btn.active { border-color: var(--text-accent); color: var(--text-accent); background: #2d1f5e; }
@@ -571,36 +576,51 @@
   <h1>Fortnox ↔ Statements Reconciliation</h1>
 
   <div class="import-area">
-    <label title="ISO-8859-1 tab-delimited XLS export from Fortnox">
-      Import Fortnox
-      <input type="file" id="fn-file" accept=".xls,.txt,.tsv,.csv">
-    </label>
-    <label title="UTF-8 CSV export from Binance (account 1971)">
-      Import Binance
-      <input type="file" id="bn-file" accept=".csv">
-    </label>
-    <label title="UTF-8 CSV export from Kraken (account 1966)">
-      Import Kraken
-      <input type="file" id="kr-file" accept=".csv">
-    </label>
-    <label title="UTF-8 CSV export from Bitfinex (account 1975)">
-      Import Bitfinex
-      <input type="file" id="bf-file" accept=".csv">
-    </label>
-    <label title="CSV export from Sec Ops Wallet BTC (account 1976) — rows before 2026-01-01 are skipped">
-      Import Sec Ops
-      <input type="file" id="so-file" accept=".csv">
-    </label>
-    <label title="CSV export from Operational Wallet BTC (account 1963) — rows before 2026-01-01 are skipped">
-      Import Operational
-      <input type="file" id="op-file" accept=".csv">
-    </label>
+    <div class="import-col">
+      <label title="ISO-8859-1 tab-delimited XLS export from Fortnox">
+        Import Fortnox
+        <input type="file" id="fn-file" accept=".xls,.txt,.tsv,.csv">
+      </label>
+    </div>
+    <div class="import-col">
+      <label title="UTF-8 CSV export from Binance (account 1971)">
+        Import Binance
+        <input type="file" id="bn-file" accept=".csv">
+      </label>
+      <div id="acct-slot-1971"></div>
+    </div>
+    <div class="import-col">
+      <label title="UTF-8 CSV export from Kraken (account 1966)">
+        Import Kraken
+        <input type="file" id="kr-file" accept=".csv">
+      </label>
+      <div id="acct-slot-1966"></div>
+    </div>
+    <div class="import-col">
+      <label title="UTF-8 CSV export from Bitfinex (account 1975)">
+        Import Bitfinex
+        <input type="file" id="bf-file" accept=".csv">
+      </label>
+      <div id="acct-slot-1975"></div>
+    </div>
+    <div class="import-col">
+      <label title="CSV export from Sec Ops Wallet BTC (account 1976) — rows before 2026-01-01 are skipped">
+        Import Sec Ops
+        <input type="file" id="so-file" accept=".csv">
+      </label>
+      <div id="acct-slot-1976"></div>
+    </div>
+    <div class="import-col">
+      <label title="CSV export from Operational Wallet BTC (account 1963) — rows before 2026-01-01 are skipped">
+        Import Operational
+        <input type="file" id="op-file" accept=".csv">
+      </label>
+      <div id="acct-slot-1963"></div>
+    </div>
     <span id="import-status"></span>
   </div>
 
-  <div class="account-switcher" id="account-switcher" style="margin-left:8px">
-    <!-- populated by JS once /api/accounts is loaded -->
-  </div>
+  <div id="account-switcher" style="display:none"></div>
 
   <div class="filter-bar">
     <span style="color:var(--text-th);font-size:11px">Dates:</span>
@@ -1054,26 +1074,28 @@ function filterParams(extra = {}) {
 async function loadAccountSwitcher() {
   try {
     const accounts = await fetch('/api/accounts').then(r => r.json());
-    const sw = document.getElementById('account-switcher');
-    if (!accounts.length) { sw.style.display = 'none'; return; }
+    if (!accounts.length) return;
 
     // Ensure activeAccount is valid
     if (!accounts.find(a => a.account === activeAccount)) {
       activeAccount = accounts[0].account;
     }
 
-    sw.innerHTML = accounts.map(a =>
-      `<button class="acct-btn${a.account === activeAccount ? ' active' : ''}"
-               data-account="${a.account}"
-               title="${esc(a.source)} — Fortnox konto ${a.account}">
-         ${esc(a.source)} ${a.account}
-       </button>`
-    ).join('');
+    // Clear slots before repopulating (guard against multiple calls)
+    document.querySelectorAll('[id^="acct-slot-"]').forEach(s => s.innerHTML = '');
 
-    sw.querySelectorAll('.acct-btn').forEach(btn => {
+    // Place each button into its named slot beneath the matching import button
+    for (const a of accounts) {
+      const slot = document.getElementById('acct-slot-' + a.account);
+      if (!slot) continue;
+      const btn = document.createElement('button');
+      btn.className = 'acct-btn' + (a.account === activeAccount ? ' active' : '');
+      btn.dataset.account = a.account;
+      btn.title = `${a.source} — Fortnox konto ${a.account}`;
+      btn.textContent = `${a.source}\n${a.account}`;
       btn.addEventListener('click', () => {
         activeAccount = btn.dataset.account;
-        sw.querySelectorAll('.acct-btn').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('.acct-btn').forEach(b => b.classList.toggle('active', b === btn));
         ['sf-type','sf-currency','sf-contra'].forEach(id => document.getElementById(id).selectedIndex = 0);
         ['sf-amt-from','sf-amt-to','sf-sek-from','sf-sek-to'].forEach(id => document.getElementById(id).value = '');
         loadOperations();
@@ -1081,7 +1103,8 @@ async function loadAccountSwitcher() {
         clearSelection();
         refresh();
       });
-    });
+      slot.appendChild(btn);
+    }
   } catch(_) {}
 }
 
