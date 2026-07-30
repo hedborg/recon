@@ -186,6 +186,11 @@ async function fetchFrankfurterRange(baseCurrency, dates) {
       if (raw[d]) last = raw[d];
       result[d] = last;
     }
+    // Single-date on a weekend: Frankfurter returns prior trading day's date,
+    // so raw is empty and forward-fill has nothing to carry. Use j.date rate.
+    if (j.date && j.rates?.SEK) {
+      for (const d of dates) { if (!result[d]) result[d] = j.rates.SEK; }
+    }
     console.log(`FX Frankfurter ${baseCurrency}/SEK ${from}..${to}: ${Object.keys(raw).length} trading days`);
     return result;
   } catch (e) {
