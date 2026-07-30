@@ -552,11 +552,17 @@ function parseBinanceTime(s) {
 
 function parseBitfinexDate(s) {
   if (!s) return null;
-  // Format: DD-MM-YY HH:MM:SS  e.g. "01-06-26 05:19:59"
-  const m = s.trim().match(/^(\d{2})-(\d{2})-(\d{2}) (\d{2}:\d{2}:\d{2})$/);
-  if (!m) return null;
-  const [, dd, mm, yy, time] = m;
-  return `20${yy}-${mm}-${dd}T${time}Z`;
+  s = s.trim();
+  // Format A: DD-MM-YY HH:MM:SS  e.g. "01-06-26 05:19:59"
+  const mA = s.match(/^(\d{2})-(\d{2})-(\d{2}) (\d{2}:\d{2}:\d{2})$/);
+  if (mA) {
+    const [, dd, mm, yy, time] = mA;
+    return `20${yy}-${mm}-${dd}T${time}Z`;
+  }
+  // Format B: YYYY-MM-DD HH:MM:SS  e.g. "2026-06-29 19:42:15"
+  const mB = s.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})$/);
+  if (mB) return `${mB[1]}T${mB[2]}Z`;
+  return null;
 }
 
 function parseSwedishDate(s) {
