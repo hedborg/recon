@@ -11,7 +11,7 @@
 
 const pool = require('./db');
 
-const USD_STABLECOINS = new Set(['USDT','USDC','BUSD','DAI','TUSD','FDUSD','USDP','UST','USDT0POL','USDT0ARB']);
+const USD_STABLECOINS = new Set(['USDT','USDC','BUSD','DAI','TUSD','FDUSD','USDP','UST','USDT0POL','USDT0ARB','UDC']);
 
 // Fiat currencies handled by Frankfurter (base currency → SEK)
 // Add more as new exchanges bring new fiats
