@@ -182,6 +182,7 @@ async function migrate() {
     [6570, 'Banking Costs'],
     [3100, 'Gross Product Value'],
     [2423, 'Store Credit'],
+    [1982, 'SAFE Wallet'],
   ];
   for (const [num, name] of seedAccounts) {
     await pool.query(`
