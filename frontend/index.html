@@ -832,6 +832,12 @@
     <button class="btn btn-explain" id="btn-explain-fn">Mark Fortnox as Explained</button>
     <button class="btn btn-explain" id="btn-explain-bn" style="display:none">Mark Statement as Explained</button>
     <button class="btn btn-cancel"  id="btn-cancel">Cancel</button>
+    <div id="match-progress" style="display:none;flex:1 1 100%;margin-top:6px;">
+      <div style="font-size:11px;color:var(--text-accent);margin-bottom:3px;" id="match-progress-label"></div>
+      <div style="background:var(--border);border-radius:4px;height:6px;width:100%;">
+        <div id="match-progress-bar" style="background:#a78bfa;height:6px;border-radius:4px;width:0%;transition:width 0.2s;"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Bottom: Match Detail -->
@@ -1727,6 +1733,38 @@ async function updateProposalBar() {
   }
 }
 
+// ── Progress bar helpers ──────────────────────────────────────────
+function showProgress(label) {
+  document.getElementById('match-progress').style.display = '';
+  document.getElementById('match-progress-label').textContent = label;
+  document.getElementById('match-progress-bar').style.width = '0%';
+}
+function updateProgress(done, total) {
+  document.getElementById('match-progress-label').textContent = `Saving… ${done} / ${total}`;
+  document.getElementById('match-progress-bar').style.width = `${Math.round(done / total * 100)}%`;
+}
+function hideProgress() {
+  document.getElementById('match-progress').style.display = 'none';
+}
+
+async function postMatchesBatched(bodies, labelSingular) {
+  const CHUNK = 200;
+  const total = bodies.length;
+  if (total > CHUNK) showProgress(`Saving 0 / ${total}`);
+  let done = 0;
+  for (let i = 0; i < bodies.length; i += CHUNK) {
+    const chunk = bodies.slice(i, i + CHUNK);
+    await Promise.all(chunk.map(async body => {
+      const r = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error('Save failed');
+      done++;
+    }));
+    if (total > CHUNK) updateProgress(done, total);
+  }
+  hideProgress();
+  return done;
+}
+
 // ── Actions ───────────────────────────────────────────────────────
 async function confirmMatch() {
   const bnList = [...selectedBns.values()];
@@ -1734,28 +1772,29 @@ async function confirmMatch() {
   if (fnList.length === 0 || bnList.length === 0) return;
   const notes = document.getElementById('proposal-notes').value.trim();
 
-  // Many-to-1: each Fortnox row × each statement row = one match record per pair
-  // Typical use cases:
-  //   1 Fortnox + N statement rows (1-to-many)
-  //   N Fortnox + 1 statement row  (many-to-1)
-  let matchCount = 0;
+  const bodies = [];
   for (const fn of fnList) {
     for (const bn of bnList) {
       const rate = bn._fxRate || null;
-      const body = {
+      bodies.push({
         fortnox_id:   fn.id,
         statement_id: bn.id,
         match_type:   'manual',
         fx_rate_used: rate ? parseFloat(rate).toFixed(6) : null,
         notes,
         matched_by:   'user',
-      };
-      const r = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) { toast('Error saving match', true); return; }
-      matchCount++;
+      });
     }
   }
-  toast(`${matchCount} match${matchCount > 1 ? 'es' : ''} confirmed`);
+
+  try {
+    const count = await postMatchesBatched(bodies, 'match');
+    toast(`${count} match${count > 1 ? 'es' : ''} confirmed`);
+  } catch(e) {
+    hideProgress();
+    toast('Error saving match', true);
+    return;
+  }
   clearSelection();
   refresh();
 }
@@ -1766,18 +1805,23 @@ async function explainBinance() {
   const notes = document.getElementById('proposal-notes').value.trim() || prompt('Explanation note (e.g. internal transfer, staking):');
   if (!notes) return;
 
-  for (const bn of bnList) {
-    const body = {
-      fortnox_id:   [...selectedFns.values()][0]?.id || null,
-      statement_id: bn.id,
-      match_type:   'explained',
-      notes,
-      matched_by:   'user',
-    };
-    const r = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) { toast('Error saving explanation', true); return; }
+  const fnId = [...selectedFns.values()][0]?.id || null;
+  const bodies = bnList.map(bn => ({
+    fortnox_id:   fnId,
+    statement_id: bn.id,
+    match_type:   'explained',
+    notes,
+    matched_by:   'user',
+  }));
+
+  try {
+    const count = await postMatchesBatched(bodies, 'explanation');
+    toast(`${count} statement row${count > 1 ? 's' : ''} explained`);
+  } catch(e) {
+    hideProgress();
+    toast('Error saving explanation', true);
+    return;
   }
-  toast(`${bnList.length} Binance row${bnList.length > 1 ? 's' : ''} explained`);
   clearSelection();
   refresh();
 }
@@ -1788,12 +1832,16 @@ async function explainFortnox() {
   const notes = document.getElementById('proposal-notes').value.trim() || prompt('Explanation note:');
   if (!notes) return;
 
-  for (const fn of fnList) {
-    const body = { fortnox_id: fn.id, match_type: 'explained', notes, matched_by: 'user' };
-    const r = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) { toast('Error saving explanation', true); return; }
+  const bodies = fnList.map(fn => ({ fortnox_id: fn.id, match_type: 'explained', notes, matched_by: 'user' }));
+
+  try {
+    const count = await postMatchesBatched(bodies, 'explanation');
+    toast(`${count} Fortnox row${count > 1 ? 's' : ''} marked as explained`);
+  } catch(e) {
+    hideProgress();
+    toast('Error saving explanation', true);
+    return;
   }
-  toast(`${fnList.length} Fortnox row${fnList.length > 1 ? 's' : ''} marked as explained`);
   clearSelection();
   refresh();
 }
