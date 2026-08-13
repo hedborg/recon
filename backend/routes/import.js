@@ -268,9 +268,7 @@ router.post('/bitfinex', upload.single('file'), async (req, res) => {
       const date = parseBitfinexDate(rawDate);
       if (!date || !currency) { skipped++; continue; }
 
-      // Extract type from start of description (e.g. "Deposit (LNX) #..." → "Deposit")
-      const typeMatch = desc.match(/^([A-Za-z ]+?)(?:\s*[\(#]|$)/);
-      const type = typeMatch ? typeMatch[1].trim() : desc.slice(0, 40);
+      const type = classifyBitfinexType(desc);
 
       valueBatch.push([txid, date, type, currency, amount, wallet, desc]);
     }
@@ -548,6 +546,20 @@ function parseBinanceTime(s) {
     return '20' + s.replace(' ', 'T') + 'Z';
   }
   return s;
+}
+
+// Classifies a Bitfinex ledger DESCRIPTION into one of a small set of types.
+// Order matters: "withdrawal fee" must be checked before the general "withdrawal" match.
+function classifyBitfinexType(desc) {
+  const d = desc.toLowerCase();
+  if (d.includes('withdrawal') && d.includes('fee')) return 'Withdrawal fee';
+  if (d.startsWith('deposit')) return 'Deposit';
+  if (d.includes('withdrawal')) return 'Withdrawal';
+  if (d.startsWith('exchange')) return 'Exchange';
+  if (d.startsWith('transfer')) return 'Transfer';
+  // Fallback for anything unrecognized: old prefix-extraction behavior
+  const typeMatch = desc.match(/^([A-Za-z ]+?)(?:\s*[\(#]|$)/);
+  return typeMatch ? typeMatch[1].trim() : desc.slice(0, 40);
 }
 
 function parseBitfinexDate(s) {
