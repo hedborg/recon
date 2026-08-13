@@ -466,7 +466,7 @@ async function runAutoMatch(account = '1971') {
       const dateStr = fn.bokforingsdatum instanceof Date
         ? fn.bokforingsdatum.toISOString().slice(0, 10)
         : String(fn.bokforingsdatum).slice(0, 10);
-      const fnSek = parseFloat(fn.kredit);
+      const fnSek = parseFloat(fn.kredit) * -1; // kredit is positive in Fortnox; negate to match negative statement withdrawals
 
       const { rows: stRows } = await client.query(`
         SELECT s.id, s.amount, s.currency, s.date
@@ -493,14 +493,14 @@ async function runAutoMatch(account = '1971') {
 
         // Try individual row match (within 2%)
         for (const st of rows) {
-          const stSek = Math.abs(parseFloat(st.amount)) * fxRate;
-          const diff  = Math.abs(fnSek - stSek) / fnSek;
+          const stSek = parseFloat(st.amount) * fxRate;
+          const diff  = Math.abs(fnSek - stSek) / Math.abs(fnSek);
           if (diff <= 0.02) {
             await client.query(`
               INSERT INTO recon_matches (fortnox_id, statement_id, match_type, fx_rate_used, notes, matched_by)
               VALUES ($1,$2,'auto',$3,$4,'system')
             `, [fn.id, st.id, fxRate.toFixed(6),
-                `Auto: ${Math.abs(parseFloat(st.amount)).toFixed(4)} ${currency} × ${fxRate.toFixed(4)} = ${stSek.toFixed(2)} SEK vs ${fnSek.toFixed(2)} (${(diff*100).toFixed(2)}%)`]);
+                `Auto: ${parseFloat(st.amount).toFixed(4)} ${currency} × ${fxRate.toFixed(4)} = ${stSek.toFixed(2)} SEK vs ${fnSek.toFixed(2)} (${(diff*100).toFixed(2)}%)`]);
             matchCount++;
             matched = true;
             break;
@@ -509,8 +509,8 @@ async function runAutoMatch(account = '1971') {
 
         // Try sum of same-currency rows for the day (within 2%)
         if (!matched) {
-          const sumSek = rows.reduce((s, r) => s + Math.abs(parseFloat(r.amount)) * fxRate, 0);
-          const diff   = Math.abs(fnSek - sumSek) / fnSek;
+          const sumSek = rows.reduce((s, r) => s + parseFloat(r.amount) * fxRate, 0);
+          const diff   = Math.abs(fnSek - sumSek) / Math.abs(fnSek);
           if (diff <= 0.02) {
             for (const st of rows) {
               await client.query(`
