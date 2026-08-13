@@ -118,7 +118,7 @@ router.get('/statements/currencies', async (req, res) => {
 router.get('/chart-of-accounts', async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT account_number, account_name FROM chart_of_accounts ORDER BY account_number`
+      `SELECT account_number, account_name, is_active FROM chart_of_accounts ORDER BY account_number`
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -138,6 +138,27 @@ router.post('/chart-of-accounts', async (req, res) => {
       [account_number, account_name]
     );
     res.status(201).json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /api/chart-of-accounts/:number  — rename / activate / inactivate
+// ---------------------------------------------------------------------------
+router.patch('/chart-of-accounts/:number', async (req, res) => {
+  const { account_name, is_active } = req.body;
+  const updates = [], values = [];
+  let i = 1;
+  if ('account_name' in req.body) { updates.push(`account_name = $${i++}`); values.push(account_name); }
+  if ('is_active'    in req.body) { updates.push(`is_active    = $${i++}`); values.push(is_active); }
+  if (!updates.length) return res.status(400).json({ error: 'no fields to update' });
+  values.push(req.params.number);
+  try {
+    const { rows } = await pool.query(
+      `UPDATE chart_of_accounts SET ${updates.join(', ')} WHERE account_number = $${i} RETURNING *`,
+      values
+    );
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    res.json(rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

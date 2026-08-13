@@ -657,6 +657,7 @@
   <button class="tab-btn active" data-tab="recon">📊 Reconciliation</button>
   <button class="tab-btn"        data-tab="fx">📈 FX Rates</button>
   <button class="tab-btn"        data-tab="reval">📉 FX Revaluation</button>
+  <button class="tab-btn"        data-tab="accounts">⚙ Accounts</button>
 </div>
 
 <div class="main">
@@ -715,6 +716,18 @@
     <span id="reval-status" style="font-size:11px;color:var(--text-muted);"></span>
   </div>
   <div id="reval-table-wrap"></div>
+</div>
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<!-- ═══════════════════════ ACCOUNTS TAB ═══════════════════════════ -->
+<div class="tab-content" id="tab-accounts" style="padding:16px;overflow:auto;flex-direction:column;">
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;">
+    <input type="number" id="acct-new-number" placeholder="Number" style="width:90px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:12px;">
+    <input type="text" id="acct-new-name" placeholder="Account name" style="flex:0 1 320px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:12px;">
+    <button class="btn-filter" id="btn-acct-add">+ Add account</button>
+    <span id="acct-status" style="font-size:11px;color:var(--text-muted);"></span>
+  </div>
+  <div id="accounts-table-wrap"></div>
 </div>
 <!-- ═══════════════════════════════════════════════════════════════ -->
 
@@ -1347,10 +1360,12 @@ function renderStatements(rows) {
     if (r.is_matched) tr.classList.add('matched-row');
     if (selectedBns.has(r.id)) tr.classList.add('selected');
     const matchedIcon = r.is_matched ? '<span style="color:#22c55e;font-size:10px" title="Matched">✓</span> ' : ''; // #22c55e stays hardcoded
-    // Build contra_account select
-    const acctOptions = chartOfAccounts.map(a =>
-      `<option value="${a.account_number}" ${r.contra_account == a.account_number ? 'selected' : ''}>${a.account_number} ${esc(a.account_name)}</option>`
-    ).join('');
+    // Build contra_account select — hide inactive accounts unless already assigned to this row
+    const acctOptions = chartOfAccounts
+      .filter(a => a.is_active || a.account_number == r.contra_account)
+      .map(a =>
+        `<option value="${a.account_number}" ${r.contra_account == a.account_number ? 'selected' : ''}>${a.account_number} ${esc(a.account_name)}</option>`
+      ).join('');
 
     tr.innerHTML = `
       <td class="date">${fmtDateTime(r.date)}</td>
@@ -2237,7 +2252,101 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const id = 'tab-' + btn.dataset.tab;
     document.getElementById(id).classList.add('active');
     if (btn.dataset.tab === 'fx') loadFxView();
+    if (btn.dataset.tab === 'accounts') loadAccountsView();
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Accounts view (Chart of Accounts management)
+// ═══════════════════════════════════════════════════════════════════
+async function loadAccountsView() {
+  await loadChartOfAccounts();
+  renderAccountsTable();
+}
+
+function renderAccountsTable() {
+  const rows = [...chartOfAccounts].sort((a, b) => a.account_number - b.account_number);
+
+  let html = `<table class="reval-table">
+    <thead><tr>
+      <th>Number</th><th>Name</th><th>Status</th>
+    </tr></thead><tbody>`;
+
+  for (const a of rows) {
+    html += `<tr data-number="${a.account_number}">
+      <td>${a.account_number}</td>
+      <td class="acct-name-cell"><input class="acct-name-input" type="text" value="${esc(a.account_name)}" style="width:100%;background:transparent;border:1px solid transparent;color:var(--text-body);padding:2px 4px;border-radius:3px;font-size:12px;"></td>
+      <td class="acct-status-cell"><button class="acct-btn${a.is_active ? ' active' : ''}" data-action="toggle-active" style="width:auto;">${a.is_active ? 'Active' : 'Inactive'}</button></td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+
+  const wrap = document.getElementById('accounts-table-wrap');
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll('tr[data-number]').forEach(tr => {
+    const number = tr.dataset.number;
+
+    const nameCell  = tr.querySelector('.acct-name-cell');
+    const nameInput = nameCell.querySelector('.acct-name-input');
+    const debouncedSave = debounce(() => patchAccount(number, { account_name: nameInput.value }, nameCell), 700);
+    nameInput.addEventListener('input', debouncedSave);
+    nameInput.addEventListener('blur', () => patchAccount(number, { account_name: nameInput.value }, nameCell));
+
+    const statusCell = tr.querySelector('.acct-status-cell');
+    const toggleBtn  = statusCell.querySelector('[data-action="toggle-active"]');
+    toggleBtn.addEventListener('click', () => {
+      const nowActive = !toggleBtn.classList.contains('active');
+      patchAccount(number, { is_active: nowActive }, statusCell).then(() => {
+        toggleBtn.classList.toggle('active', nowActive);
+        toggleBtn.textContent = nowActive ? 'Active' : 'Inactive';
+      });
+    });
+  });
+}
+
+async function patchAccount(number, fields, el) {
+  try {
+    const res = await fetch(`/api/chart-of-accounts/${number}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) throw new Error();
+    const account = chartOfAccounts.find(a => a.account_number == number);
+    if (account) Object.assign(account, fields);
+    el.classList.remove('save-err');
+    el.classList.add('save-ok');
+    setTimeout(() => el.classList.remove('save-ok'), 800);
+    renderStatements(bnRows); // refresh contra-account dropdowns with updated name/status
+  } catch (_) {
+    el.classList.remove('save-ok');
+    el.classList.add('save-err');
+    setTimeout(() => el.classList.remove('save-err'), 1500);
+  }
+}
+
+document.getElementById('btn-acct-add').addEventListener('click', async () => {
+  const numberEl = document.getElementById('acct-new-number');
+  const nameEl    = document.getElementById('acct-new-name');
+  const status    = document.getElementById('acct-status');
+  const account_number = parseInt(numberEl.value, 10);
+  const account_name   = nameEl.value.trim();
+  if (!account_number || !account_name) { toast('Number and name required', true); return; }
+  try {
+    const res = await fetch('/api/chart-of-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_number, account_name }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed to add account');
+    numberEl.value = ''; nameEl.value = '';
+    status.textContent = '';
+    await loadAccountsView();
+    toast(`Added ${account_number} ${account_name}`);
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════

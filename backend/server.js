@@ -157,6 +157,7 @@ async function migrate() {
       created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  await pool.query(`ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`);
   const seedAccounts = [
     [1920, 'Svea bank'],
     [1932, 'Mynt'],
