@@ -34,7 +34,8 @@ const CG_IDS = {
   FIL:   'filecoin',      VET:   'vechain',          TON:  'the-open-network',
   LNX:   'bitcoin',      // Bitfinex Lightning Network BTC — 1:1 with BTC
   DASH:  'dash',
-  POL:   'matic-network', // Polygon — rebranded from MATIC to POL in 2024, same CG id
+  POL:   'polygon-ecosystem-token', // Polygon — rebranded from MATIC to POL in 2024
+  SUI:   'sui',
 };
 
 // Memory cache: "COIN:YYYY-MM-DD" → rate (only positive values stored)
