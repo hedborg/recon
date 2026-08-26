@@ -1067,20 +1067,42 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-auto-contra').addEventListener('click', async () => {
     const btn = document.getElementById('btn-auto-contra');
     const status = document.getElementById('automatch-status');
-    if (!confirm('Auto-tag contra accounts on inter-account transfers?\n\nMatches deposits/withdrawals across Operational, Kraken, Binance, Bitfinex with same currency, ±8h window, amount within 0.1%.')) return;
+    const dateRange = filterFrom || filterTo
+      ? ` for ${filterFrom || '…'} – ${filterTo || '…'}`
+      : ' (all dates)';
+    if (!confirm(`Auto-tag contra accounts on inter-account transfers${dateRange}?\n\nMatches deposits/withdrawals across Operational/Hot Wallet/Kraken/Binance/Bitfinex with same currency, ±8h window, amount within 0.1%.`)) return;
     btn.disabled = true;
-    status.textContent = 'Running…';
+    status.textContent = 'Finding matches…';
     try {
-      const r = await fetch('/api/auto-contra', { method: 'POST' }).then(r => r.json());
+      const r = await fetch('/api/auto-contra', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: filterFrom || null, to: filterTo || null }),
+      }).then(r => r.json());
       if (r.error) throw new Error(r.error);
-      status.textContent = `✓ ${r.tagged} tagged (${r.deposits} deposits, ${r.withdrawals} withdrawals)`;
-      toast(`Auto Contra: ${r.tagged} statements tagged`);
-      refresh();
+      if (r.total === 0) {
+        status.textContent = '✓ No new transfers to tag';
+        btn.disabled = false;
+        setTimeout(() => { status.textContent = ''; }, 5000);
+        return;
+      }
+      // Poll for progress
+      const poll = setInterval(async () => {
+        const s = await fetch('/api/auto-contra/status').then(r => r.json());
+        status.textContent = `Tagging… ${s.done} / ${s.total}`;
+        if (!s.running) {
+          clearInterval(poll);
+          status.textContent = `✓ ${s.tagged} tagged`;
+          toast(`Auto Contra: ${s.tagged} statements tagged`);
+          btn.disabled = false;
+          setTimeout(() => { status.textContent = ''; }, 8000);
+          refresh();
+        }
+      }, 500);
     } catch(e) {
       status.textContent = `✗ ${e.message}`;
+      btn.disabled = false;
     }
-    btn.disabled = false;
-    setTimeout(() => { status.textContent = ''; }, 8000);
   });
 
   // Show-all toggle

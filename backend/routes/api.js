@@ -665,16 +665,28 @@ router.get('/revaluation', async (req, res) => {
 // withdrawal on another internal account (same currency, ±8h, amount within
 // 0.1%) and set contra_account on the deposit to the withdrawal's account.
 // Also sets contra_account on the withdrawal if not already set.
+// Accepts optional from/to date params to limit scope.
 // ---------------------------------------------------------------------------
-router.post('/auto-contra', async (_req, res) => {
+const autoContraState = { running: false, total: 0, done: 0, tagged: 0, startedAt: null };
+
+router.get('/auto-contra/status', (_req, res) => res.json(autoContraState));
+
+router.post('/auto-contra', async (req, res) => {
+  if (autoContraState.running) return res.json({ queued: true, ...autoContraState });
+  const { from, to } = req.body || {};
   try {
+    const dateFilter = (alias) => {
+      const parts = [];
+      if (from) parts.push(`${alias}.date >= '${from}'::date`);
+      if (to)   parts.push(`${alias}.date <  ('${to}'::date + INTERVAL '1 day')`);
+      return parts.length ? 'AND ' + parts.join(' AND ') : '';
+    };
+
     // Find deposit↔withdrawal pairs where deposit has no contra_account
     const { rows: depositMatches } = await pool.query(`
       SELECT DISTINCT ON (d.id)
         d.id   AS deposit_id,
-        w.account::integer AS suggested_contra,
-        w.id   AS withdrawal_id,
-        d.account::integer AS deposit_account
+        w.account::integer AS suggested_contra
       FROM stg_statements d
       JOIN stg_statements w
         ON w.currency = d.currency
@@ -688,6 +700,7 @@ router.post('/auto-contra', async (_req, res) => {
         AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1966','1971','1975')
         AND d.contra_account IS NULL
+        ${dateFilter('d')}
       ORDER BY d.id, ABS(EXTRACT(EPOCH FROM (d.date - w.date)))
     `);
 
@@ -695,8 +708,7 @@ router.post('/auto-contra', async (_req, res) => {
     const { rows: withdrawalMatches } = await pool.query(`
       SELECT DISTINCT ON (w.id)
         w.id   AS withdrawal_id,
-        d.account::integer AS suggested_contra,
-        d.id   AS deposit_id
+        d.account::integer AS suggested_contra
       FROM stg_statements w
       JOIN stg_statements d
         ON d.currency = w.currency
@@ -710,27 +722,36 @@ router.post('/auto-contra', async (_req, res) => {
         AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.contra_account IS NULL
+        ${dateFilter('w')}
       ORDER BY w.id, ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
     `);
 
-    let tagged = 0;
-    for (const { deposit_id, suggested_contra } of depositMatches) {
-      await pool.query(
-        `UPDATE stg_statements SET contra_account = $1 WHERE id = $2`,
-        [suggested_contra, deposit_id]
-      );
-      tagged++;
-    }
-    for (const { withdrawal_id, suggested_contra } of withdrawalMatches) {
-      await pool.query(
-        `UPDATE stg_statements SET contra_account = $1 WHERE id = $2`,
-        [suggested_contra, withdrawal_id]
-      );
-      tagged++;
-    }
+    const allWork = [
+      ...depositMatches.map(r => ({ id: r.deposit_id, contra: r.suggested_contra })),
+      ...withdrawalMatches.map(r => ({ id: r.withdrawal_id, contra: r.suggested_contra })),
+    ];
 
-    res.json({ tagged, deposits: depositMatches.length, withdrawals: withdrawalMatches.length });
+    autoContraState.running   = true;
+    autoContraState.total     = allWork.length;
+    autoContraState.done      = 0;
+    autoContraState.tagged    = 0;
+    autoContraState.startedAt = new Date().toISOString();
+
+    res.json({ started: true, total: allWork.length });
+
+    // Run updates in background
+    (async () => {
+      for (const { id, contra } of allWork) {
+        try {
+          await pool.query(`UPDATE stg_statements SET contra_account = $1 WHERE id = $2`, [contra, id]);
+          autoContraState.tagged++;
+        } catch(e) { /* skip */ }
+        autoContraState.done++;
+      }
+      autoContraState.running = false;
+    })();
   } catch (err) {
+    autoContraState.running = false;
     console.error('Auto-contra error:', err);
     res.status(500).json({ error: err.message });
   }
