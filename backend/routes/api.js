@@ -659,4 +659,81 @@ router.get('/revaluation', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// POST /api/auto-contra
+// For each untagged deposit on Kraken/Binance/Bitfinex, find a matching
+// withdrawal on another internal account (same currency, ±8h, amount within
+// 0.1%) and set contra_account on the deposit to the withdrawal's account.
+// Also sets contra_account on the withdrawal if not already set.
+// ---------------------------------------------------------------------------
+router.post('/auto-contra', async (_req, res) => {
+  try {
+    // Find deposit↔withdrawal pairs where deposit has no contra_account
+    const { rows: depositMatches } = await pool.query(`
+      SELECT DISTINCT ON (d.id)
+        d.id   AS deposit_id,
+        w.account::integer AS suggested_contra,
+        w.id   AS withdrawal_id,
+        d.account::integer AS deposit_account
+      FROM stg_statements d
+      JOIN stg_statements w
+        ON w.currency = d.currency
+        AND w.amount < 0
+        AND w.type = 'Withdrawal'
+        AND w.account IN ('1963','1971','1975','1966')
+        AND w.account != d.account
+        AND w.date BETWEEN d.date - INTERVAL '8 hours' AND d.date + INTERVAL '8 hours'
+        AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
+      WHERE d.amount > 0
+        AND d.type = 'deposit'
+        AND d.account IN ('1966','1971','1975')
+        AND d.contra_account IS NULL
+      ORDER BY d.id, ABS(EXTRACT(EPOCH FROM (d.date - w.date)))
+    `);
+
+    // Find withdrawal↔deposit pairs where withdrawal has no contra_account
+    const { rows: withdrawalMatches } = await pool.query(`
+      SELECT DISTINCT ON (w.id)
+        w.id   AS withdrawal_id,
+        d.account::integer AS suggested_contra,
+        d.id   AS deposit_id
+      FROM stg_statements w
+      JOIN stg_statements d
+        ON d.currency = w.currency
+        AND d.amount > 0
+        AND d.type = 'deposit'
+        AND d.account IN ('1966','1971','1975')
+        AND d.account != w.account
+        AND d.date BETWEEN w.date - INTERVAL '8 hours' AND w.date + INTERVAL '8 hours'
+        AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
+      WHERE w.amount < 0
+        AND w.type = 'Withdrawal'
+        AND w.account IN ('1963','1971','1975','1966')
+        AND w.contra_account IS NULL
+      ORDER BY w.id, ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
+    `);
+
+    let tagged = 0;
+    for (const { deposit_id, suggested_contra } of depositMatches) {
+      await pool.query(
+        `UPDATE stg_statements SET contra_account = $1 WHERE id = $2`,
+        [suggested_contra, deposit_id]
+      );
+      tagged++;
+    }
+    for (const { withdrawal_id, suggested_contra } of withdrawalMatches) {
+      await pool.query(
+        `UPDATE stg_statements SET contra_account = $1 WHERE id = $2`,
+        [suggested_contra, withdrawal_id]
+      );
+      tagged++;
+    }
+
+    res.json({ tagged, deposits: depositMatches.length, withdrawals: withdrawalMatches.length });
+  } catch (err) {
+    console.error('Auto-contra error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
