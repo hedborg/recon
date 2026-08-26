@@ -680,7 +680,7 @@ router.post('/auto-contra', async (_req, res) => {
         ON w.currency = d.currency
         AND w.amount < 0
         AND w.type = 'Withdrawal'
-        AND w.account IN ('1963','1971','1975','1966')
+        AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.account != d.account
         AND w.date BETWEEN d.date - INTERVAL '8 hours' AND d.date + INTERVAL '8 hours'
         AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
@@ -708,7 +708,7 @@ router.post('/auto-contra', async (_req, res) => {
         AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
       WHERE w.amount < 0
         AND w.type = 'Withdrawal'
-        AND w.account IN ('1963','1971','1975','1966')
+        AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.contra_account IS NULL
       ORDER BY w.id, ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
     `);

@@ -628,6 +628,13 @@
       </label>
       <div id="acct-slot-1963"></div>
     </div>
+    <div class="import-col">
+      <label title="Power BI Excel export from Hot Wallet (account 1580)">
+        Import Hot Wallet
+        <input type="file" id="hw-file" accept=".xlsx">
+      </label>
+      <div id="acct-slot-1580"></div>
+    </div>
     <span id="import-status"></span>
   </div>
 
@@ -917,6 +924,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupImport('bf-file', '/import/bitfinex');
   setupImport('so-file', '/import/secops');
   setupImport('op-file', '/import/operational');
+  setupImport('hw-file', '/import/hotwallet');
   document.getElementById('btn-confirm').addEventListener('click', confirmMatch);
   document.getElementById('btn-explain-fn').addEventListener('click', explainFortnox);
   document.getElementById('btn-explain-bn').addEventListener('click', explainBinance);

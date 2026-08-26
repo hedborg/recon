@@ -591,4 +591,102 @@ function parseSEK(s) {
   return parseFloat(s.trim().replace(/\s/g, '').replace(',', '.')) || 0;
 }
 
+// ---------------------------------------------------------------------------
+// Hot Wallet import  (Power BI Excel export, account 1580)
+// Columns: created_ts_utc, transaction_type, sweep_type, swept_currency_id,
+//          payment_method_id, destination_wallet, withdrawal_amount
+// Dates are Excel serial numbers (days since 1899-12-30)
+// No contra_account set on import — let Auto Contra fill it in
+// ---------------------------------------------------------------------------
+router.post('/hotwallet', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  try {
+    const XLSX = require('xlsx');
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+    // Find header row (first row containing 'created_ts_utc' or 'withdrawal_amount')
+    let headerIdx = rawRows.findIndex(r =>
+      Array.isArray(r) && r.some(c => typeof c === 'string' && c.toLowerCase().includes('created_ts'))
+    );
+    if (headerIdx === -1) return res.status(400).json({ error: 'Header row not found' });
+
+    const headers = rawRows[headerIdx].map(h => (h || '').toString().toLowerCase().trim());
+    const col = name => headers.indexOf(name);
+
+    const iTs       = col('created_ts_utc');
+    const iType     = col('transaction_type');
+    const iSweep    = col('sweep_type');
+    const iCurrency = col('swept_currency_id');
+    const iDest     = col('destination_wallet');
+    const iAmount   = col('withdrawal_amount');
+
+    if ([iTs, iCurrency, iAmount].some(i => i === -1)) {
+      return res.status(400).json({ error: 'Missing required columns (created_ts_utc, swept_currency_id, withdrawal_amount)' });
+    }
+
+    // Excel serial date → ISO timestamp (Excel epoch = 1899-12-30)
+    function excelDateToISO(serial) {
+      if (!serial || typeof serial !== 'number') return null;
+      const ms = (serial - 25569) * 86400 * 1000; // 25569 = days from 1899-12-30 to 1970-01-01
+      const d = new Date(ms);
+      if (isNaN(d.getTime())) return null;
+      return d.toISOString();
+    }
+
+    const validRows = [];
+    for (const row of rawRows.slice(headerIdx + 1)) {
+      if (!Array.isArray(row)) continue;
+      const ts       = excelDateToISO(row[iTs]);
+      const currency = (row[iCurrency] || '').toString().toUpperCase().trim();
+      const amount   = parseFloat(row[iAmount]);
+      if (!ts || !currency || isNaN(amount)) continue;
+
+      const sweepType = (row[iSweep] || '').toString().trim();
+      const dest      = (row[iDest]  || '').toString().trim();
+      const txType    = iType !== -1 ? (row[iType] || '').toString().trim() : 'withdrawal';
+
+      validRows.push([ts, txType, sweepType, currency, amount, dest]);
+    }
+
+    if (validRows.length === 0) return res.json({ imported: 0, skipped: 0, autoMatched: 0 });
+
+    // Dedup by (date, currency, amount, subtype) — no unique tx ID in this export
+    const { rows: existing } = await pool.query(
+      `SELECT date, currency, amount::text, subtype FROM stg_statements WHERE source = 'HotWallet' AND account = '1580'`
+    );
+    const existingSet = new Set(existing.map(r =>
+      `${new Date(r.date).toISOString()}|${r.currency}|${parseFloat(r.amount)}|${r.subtype}`
+    ));
+
+    let imported = 0, skipped = 0;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const [ts, txType, sweepType, currency, amount, dest] of validRows) {
+        const key = `${ts}|${currency}|${amount}|${sweepType}`;
+        if (existingSet.has(key)) { skipped++; continue; }
+        await client.query(`
+          INSERT INTO stg_statements (source, account, date, type, subtype, currency, amount, remark)
+          VALUES ('HotWallet', '1580', $1, $2, $3, $4, $5, $6)
+        `, [ts, txType, sweepType, currency, amount, dest]);
+        imported++;
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    res.json({ imported, skipped });
+  } catch (err) {
+    console.error('HotWallet import error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
