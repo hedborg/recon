@@ -1244,6 +1244,7 @@ async function loadChartOfAccounts() {
     chartOfAccounts = await fetch('/api/chart-of-accounts').then(r => r.json());
     const sel = document.getElementById('sf-contra');
     sel.innerHTML = '<option value="">All</option>' +
+      '<option value="__none__">— No contra</option>' +
       chartOfAccounts.map(a =>
         `<option value="${a.account_number}">${a.account_number} ${esc(a.account_name)}</option>`
       ).join('');
@@ -1376,7 +1377,8 @@ function renderStatements(rows) {
 
   if (sfType)     annotated = annotated.filter(r => r.type === sfType);
   if (sfCurrency) annotated = annotated.filter(r => r.currency === sfCurrency);
-  if (sfContra)   annotated = annotated.filter(r => String(r.contra_account) === sfContra);
+  if (sfContra === '__none__') annotated = annotated.filter(r => !r.contra_account);
+  else if (sfContra)           annotated = annotated.filter(r => String(r.contra_account) === sfContra);
   if (sfAmtFrom)  annotated = annotated.filter(r => Math.abs(parseFloat(r.amount)) >= parseFloat(sfAmtFrom));
   if (sfAmtTo)    annotated = annotated.filter(r => Math.abs(parseFloat(r.amount)) <= parseFloat(sfAmtTo));
   if (sfSekFrom)  annotated = annotated.filter(r => r._sek != null && Math.abs(r._sek) >= parseFloat(sfSekFrom));

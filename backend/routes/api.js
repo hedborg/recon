@@ -675,6 +675,14 @@ router.post('/auto-contra', async (req, res) => {
   if (autoContraState.running) return res.json({ queued: true, ...autoContraState });
   const { from, to } = req.body || {};
   try {
+    // Normalize USD stablecoin variants to 'USDT' for cross-platform matching
+    // e.g. Hot Wallet uses USDT, Bitfinex uses UST/USDT0ARB/USDT0POL/UDC
+    const currencyNorm = `CASE
+      WHEN currency IN ('UST','USDT0ARB','USDT0POL','UDC','USDC','BUSD','DAI','TUSD','FDUSD','USDP')
+      THEN 'USDT'
+      ELSE currency
+    END`;
+
     const dateFilter = (alias) => {
       const parts = [];
       if (from) parts.push(`${alias}.date >= '${from}'::date`);
@@ -689,7 +697,7 @@ router.post('/auto-contra', async (req, res) => {
         w.account::integer AS suggested_contra
       FROM stg_statements d
       JOIN stg_statements w
-        ON w.currency = d.currency
+        ON (${currencyNorm.replace(/currency/g, 'w.currency')}) = (${currencyNorm.replace(/currency/g, 'd.currency')})
         AND w.amount < 0
         AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
@@ -711,7 +719,7 @@ router.post('/auto-contra', async (req, res) => {
         d.account::integer AS suggested_contra
       FROM stg_statements w
       JOIN stg_statements d
-        ON d.currency = w.currency
+        ON (${currencyNorm.replace(/currency/g, 'd.currency')}) = (${currencyNorm.replace(/currency/g, 'w.currency')})
         AND d.amount > 0
         AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1966','1971','1975')
