@@ -40,7 +40,7 @@ router.get('/unmatched/statements', async (req, res) => {
     const { rows } = await pool.query(`
       SELECT s.id, s.date, s.source, s.account, s.type, s.subtype,
              s.currency, s.amount, s.fee, s.transaction_id, s.remark,
-             s.contra_account, s.voucher_text,
+             s.contra_account, s.contra_source, s.voucher_text,
              (m.statement_id IS NOT NULL) AS is_matched
       FROM stg_statements s
       LEFT JOIN (SELECT DISTINCT statement_id FROM recon_matches) m ON m.statement_id = s.id
@@ -169,7 +169,10 @@ router.patch('/statements/:id', async (req, res) => {
   const { contra_account, voucher_text } = req.body;
   const updates = [], values = [];
   let i = 1;
-  if ('contra_account' in req.body) { updates.push(`contra_account = $${i++}`); values.push(contra_account || null); }
+  if ('contra_account' in req.body) {
+    updates.push(`contra_account = $${i++}`); values.push(contra_account || null);
+    updates.push(`contra_source  = $${i++}`); values.push(contra_account ? 'manual' : null);
+  }
   if ('voucher_text'   in req.body) { updates.push(`voucher_text   = $${i++}`); values.push(voucher_text   || null); }
   if (!updates.length) return res.status(400).json({ error: 'nothing to update' });
   values.push(req.params.id);
@@ -797,7 +800,7 @@ router.post('/auto-contra', async (req, res) => {
     (async () => {
       for (const { id, contra } of allWork) {
         try {
-          await pool.query(`UPDATE stg_statements SET contra_account = $1 WHERE id = $2`, [contra, id]);
+          await pool.query(`UPDATE stg_statements SET contra_account = $1, contra_source = 'auto' WHERE id = $2`, [contra, id]);
           autoContraState.tagged++;
         } catch(e) { /* skip */ }
         autoContraState.done++;

@@ -1436,7 +1436,10 @@ function renderStatements(rows) {
       <td class="num">${sekDisplay}</td>
       <td class="muted" title="${esc(r.remark)}">${esc(truncate(r.remark, 28))}</td>
       <td class="muted" title="${esc(r.transaction_id)}">${esc(truncate(r.transaction_id, 20))}</td>
-      <td class="ca-cell"><select class="acct-select"><option value="">—</option>${acctOptions}</select></td>
+      <td class="ca-cell">
+        <select class="acct-select"><option value="">—</option>${acctOptions}</select>
+        ${r.contra_source === 'auto' ? '<span style="font-size:10px;color:#f59e0b;margin-left:3px" title="Set by Auto Contra">auto</span>' : r.contra_source === 'manual' ? '<span style="font-size:10px;color:#a78bfa;margin-left:3px" title="Set manually">manual</span>' : ''}
+      </td>
       <td class="vt-cell"><input class="voucher-input" type="text" value="${esc(r.voucher_text || '')}" placeholder="voucher text"></td>
     `;
     tr.addEventListener('click', () => selectBn(r, tr));
