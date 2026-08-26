@@ -679,13 +679,13 @@ router.post('/auto-contra', async (_req, res) => {
       JOIN stg_statements w
         ON w.currency = d.currency
         AND w.amount < 0
-        AND w.type = 'Withdrawal'
+        AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.account != d.account
         AND w.date BETWEEN d.date - INTERVAL '8 hours' AND d.date + INTERVAL '8 hours'
         AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
       WHERE d.amount > 0
-        AND d.type = 'deposit'
+        AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1966','1971','1975')
         AND d.contra_account IS NULL
       ORDER BY d.id, ABS(EXTRACT(EPOCH FROM (d.date - w.date)))
@@ -701,13 +701,13 @@ router.post('/auto-contra', async (_req, res) => {
       JOIN stg_statements d
         ON d.currency = w.currency
         AND d.amount > 0
-        AND d.type = 'deposit'
+        AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1966','1971','1975')
         AND d.account != w.account
         AND d.date BETWEEN w.date - INTERVAL '8 hours' AND w.date + INTERVAL '8 hours'
         AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
       WHERE w.amount < 0
-        AND w.type = 'Withdrawal'
+        AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.contra_account IS NULL
       ORDER BY w.id, ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
