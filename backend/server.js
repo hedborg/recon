@@ -128,10 +128,11 @@ async function migrate() {
       imported_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_source    ON stg_statements(source)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_account   ON stg_statements(account)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_date      ON stg_statements(date)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_currency  ON stg_statements(currency, date)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_source       ON stg_statements(source)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_account      ON stg_statements(account)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_date         ON stg_statements(date)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_currency     ON stg_statements(currency, date)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_account_date ON stg_statements(account, date DESC)`);
 
   // ── M4: ensure recon_matches has statement_id (fresh install) ───────────
   await pool.query(`
