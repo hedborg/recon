@@ -622,6 +622,7 @@ router.post('/hotwallet', upload.single('file'), async (req, res) => {
     const iCurrency = col('swept_currency_id');
     const iDest     = col('destination_wallet');
     const iAmount   = col('withdrawal_amount');
+    const iTxid     = col('txid'); // optional — added when available
 
     if ([iTs, iCurrency, iAmount].some(i => i === -1)) {
       return res.status(400).json({ error: 'Missing required columns (created_ts_utc, swept_currency_id, withdrawal_amount)' });
@@ -647,8 +648,9 @@ router.post('/hotwallet', upload.single('file'), async (req, res) => {
       const sweepType = (row[iSweep] || '').toString().trim();
       const dest      = (row[iDest]  || '').toString().trim();
       const txType    = iType !== -1 ? (row[iType] || '').toString().trim() : 'withdrawal';
+      const txid      = iTxid !== -1 ? (row[iTxid] || '').toString().trim() : '';
 
-      validRows.push([ts, txType, sweepType, currency, amount, dest]);
+      validRows.push([ts, txType, sweepType, currency, amount, dest, txid]);
     }
 
     if (validRows.length === 0) return res.json({ imported: 0, skipped: 0, autoMatched: 0 });
@@ -665,13 +667,13 @@ router.post('/hotwallet', upload.single('file'), async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      for (const [ts, txType, sweepType, currency, amount, dest] of validRows) {
+      for (const [ts, txType, sweepType, currency, amount, dest, txid] of validRows) {
         const key = `${ts}|${currency}|${amount}|${sweepType}`;
         if (existingSet.has(key)) { skipped++; continue; }
         await client.query(`
-          INSERT INTO stg_statements (source, account, date, type, subtype, currency, amount, remark)
-          VALUES ('HotWallet', '1580', $1, $2, $3, $4, $5, $6)
-        `, [ts, txType, sweepType, currency, amount, dest]);
+          INSERT INTO stg_statements (source, account, date, type, subtype, currency, amount, remark, voucher_text)
+          VALUES ('HotWallet', '1580', $1, $2, $3, $4, $5, $6, $7)
+        `, [ts, txType, sweepType, currency, amount, txid || null, dest || null]);
         imported++;
       }
       await client.query('COMMIT');
