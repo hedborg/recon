@@ -133,6 +133,7 @@ async function migrate() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_date         ON stg_statements(date)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_currency     ON stg_statements(currency, date)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_account_date ON stg_statements(account, date DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stmt_txid         ON stg_statements(transaction_id) WHERE transaction_id IS NOT NULL`);
 
   // ── M4: ensure recon_matches has statement_id (fresh install) ───────────
   await pool.query(`

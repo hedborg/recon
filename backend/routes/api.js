@@ -690,11 +690,55 @@ router.post('/auto-contra', async (req, res) => {
       return parts.length ? 'AND ' + parts.join(' AND ') : '';
     };
 
-    // Find deposit↔withdrawal pairs where deposit has no contra_account
+    // ── Pass 1: txid exact match (uses index, very fast) ────────────────────
+    const { rows: txidDeposits } = await pool.query(`
+      SELECT DISTINCT ON (d.id)
+        d.id AS deposit_id, w.account::integer AS suggested_contra
+      FROM stg_statements d
+      JOIN stg_statements w ON w.transaction_id = d.transaction_id
+        AND w.transaction_id IS NOT NULL
+        AND w.amount < 0
+        AND LOWER(w.type) = 'withdrawal'
+        AND w.account IN ('1963','1971','1975','1966','1580')
+        AND w.account != d.account
+      WHERE d.amount > 0
+        AND LOWER(d.type) = 'deposit'
+        AND d.account IN ('1966','1971','1975')
+        AND d.contra_account IS NULL
+        AND d.transaction_id IS NOT NULL
+        ${dateFilter('d')}
+      ORDER BY d.id
+    `);
+
+    const { rows: txidWithdrawals } = await pool.query(`
+      SELECT DISTINCT ON (w.id)
+        w.id AS withdrawal_id, d.account::integer AS suggested_contra
+      FROM stg_statements w
+      JOIN stg_statements d ON d.transaction_id = w.transaction_id
+        AND d.transaction_id IS NOT NULL
+        AND d.amount > 0
+        AND LOWER(d.type) = 'deposit'
+        AND d.account IN ('1966','1971','1975')
+        AND d.account != w.account
+      WHERE w.amount < 0
+        AND LOWER(w.type) = 'withdrawal'
+        AND w.account IN ('1963','1971','1975','1966','1580')
+        AND w.contra_account IS NULL
+        AND w.transaction_id IS NOT NULL
+        ${dateFilter('w')}
+      ORDER BY w.id
+    `);
+
+    // Collect ids already handled by txid pass so time/amount pass skips them
+    const txidMatchedIds = new Set([
+      ...txidDeposits.map(r => r.deposit_id),
+      ...txidWithdrawals.map(r => r.withdrawal_id),
+    ]);
+
+    // ── Pass 2: time window + amount match (for rows without txid) ───────────
     const { rows: depositMatches } = await pool.query(`
       SELECT DISTINCT ON (d.id)
-        d.id   AS deposit_id,
-        w.account::integer AS suggested_contra
+        d.id AS deposit_id, w.account::integer AS suggested_contra
       FROM stg_statements d
       JOIN stg_statements w
         ON (${currencyNorm.replace(/currency/g, 'w.currency')}) = (${currencyNorm.replace(/currency/g, 'd.currency')})
@@ -702,28 +746,20 @@ router.post('/auto-contra', async (req, res) => {
         AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.account != d.account
-        AND (
-          (w.transaction_id IS NOT NULL AND d.transaction_id IS NOT NULL AND w.transaction_id = d.transaction_id)
-          OR (
-            w.date BETWEEN d.date - INTERVAL '8 hours' AND d.date + INTERVAL '8 hours'
-            AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
-          )
-        )
+        AND w.date BETWEEN d.date - INTERVAL '8 hours' AND d.date + INTERVAL '8 hours'
+        AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
       WHERE d.amount > 0
         AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1966','1971','1975')
         AND d.contra_account IS NULL
+        AND (d.transaction_id IS NULL OR w.transaction_id IS NULL)
         ${dateFilter('d')}
-      ORDER BY d.id,
-        CASE WHEN w.transaction_id IS NOT NULL AND d.transaction_id IS NOT NULL AND w.transaction_id = d.transaction_id THEN 0 ELSE 1 END,
-        ABS(EXTRACT(EPOCH FROM (d.date - w.date)))
+      ORDER BY d.id, ABS(EXTRACT(EPOCH FROM (d.date - w.date)))
     `);
 
-    // Find withdrawal↔deposit pairs where withdrawal has no contra_account
     const { rows: withdrawalMatches } = await pool.query(`
       SELECT DISTINCT ON (w.id)
-        w.id   AS withdrawal_id,
-        d.account::integer AS suggested_contra
+        w.id AS withdrawal_id, d.account::integer AS suggested_contra
       FROM stg_statements w
       JOIN stg_statements d
         ON (${currencyNorm.replace(/currency/g, 'd.currency')}) = (${currencyNorm.replace(/currency/g, 'w.currency')})
@@ -731,26 +767,22 @@ router.post('/auto-contra', async (req, res) => {
         AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1966','1971','1975')
         AND d.account != w.account
-        AND (
-          (w.transaction_id IS NOT NULL AND d.transaction_id IS NOT NULL AND w.transaction_id = d.transaction_id)
-          OR (
-            d.date BETWEEN w.date - INTERVAL '8 hours' AND w.date + INTERVAL '8 hours'
-            AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
-          )
-        )
+        AND d.date BETWEEN w.date - INTERVAL '8 hours' AND w.date + INTERVAL '8 hours'
+        AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
       WHERE w.amount < 0
         AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.contra_account IS NULL
+        AND (d.transaction_id IS NULL OR w.transaction_id IS NULL)
         ${dateFilter('w')}
-      ORDER BY w.id,
-        CASE WHEN w.transaction_id IS NOT NULL AND d.transaction_id IS NOT NULL AND w.transaction_id = d.transaction_id THEN 0 ELSE 1 END,
-        ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
+      ORDER BY w.id, ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
     `);
 
     const allWork = [
-      ...depositMatches.map(r => ({ id: r.deposit_id, contra: r.suggested_contra })),
-      ...withdrawalMatches.map(r => ({ id: r.withdrawal_id, contra: r.suggested_contra })),
+      ...txidDeposits.map(r => ({ id: r.deposit_id, contra: r.suggested_contra })),
+      ...txidWithdrawals.map(r => ({ id: r.withdrawal_id, contra: r.suggested_contra })),
+      ...depositMatches.filter(r => !txidMatchedIds.has(r.deposit_id)).map(r => ({ id: r.deposit_id, contra: r.suggested_contra })),
+      ...withdrawalMatches.filter(r => !txidMatchedIds.has(r.withdrawal_id)).map(r => ({ id: r.withdrawal_id, contra: r.suggested_contra })),
     ];
 
     autoContraState.running   = true;
