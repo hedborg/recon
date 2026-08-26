@@ -1125,7 +1125,9 @@ function setupImport(inputId, endpoint) {
       const r = await fetch(endpoint, { method: 'POST', body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error);
-      setStatus(`✓ ${j.inserted} rows imported, ${j.auto_matched} auto-matched`);
+      const imported = j.imported ?? j.inserted ?? 0;
+      const skipped  = j.skipped ?? j.auto_matched ?? 0;
+      setStatus(`✓ ${imported} rows imported, ${skipped} skipped`);
       refresh();
     } catch (e) {
       setStatus(`✗ ${e.message}`, true);
