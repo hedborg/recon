@@ -703,7 +703,7 @@ router.post('/auto-contra', async (req, res) => {
         AND w.account != d.account
       WHERE d.amount > 0
         AND LOWER(d.type) = 'deposit'
-        AND d.account IN ('1966','1971','1975')
+        AND d.account IN ('1963','1966','1971','1975')
         AND d.contra_account IS NULL
         AND d.transaction_id IS NOT NULL
         ${dateFilter('d')}
@@ -718,7 +718,7 @@ router.post('/auto-contra', async (req, res) => {
         AND d.transaction_id IS NOT NULL
         AND d.amount > 0
         AND LOWER(d.type) = 'deposit'
-        AND d.account IN ('1966','1971','1975')
+        AND d.account IN ('1963','1966','1971','1975')
         AND d.account != w.account
       WHERE w.amount < 0
         AND LOWER(w.type) = 'withdrawal'
@@ -750,7 +750,7 @@ router.post('/auto-contra', async (req, res) => {
         AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
       WHERE d.amount > 0
         AND LOWER(d.type) = 'deposit'
-        AND d.account IN ('1966','1971','1975')
+        AND d.account IN ('1963','1966','1971','1975')
         AND d.contra_account IS NULL
         AND (d.transaction_id IS NULL OR w.transaction_id IS NULL)
         ${dateFilter('d')}
