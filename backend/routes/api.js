@@ -702,14 +702,21 @@ router.post('/auto-contra', async (req, res) => {
         AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.account != d.account
-        AND w.date BETWEEN d.date - INTERVAL '8 hours' AND d.date + INTERVAL '8 hours'
-        AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
+        AND (
+          (w.transaction_id IS NOT NULL AND d.transaction_id IS NOT NULL AND w.transaction_id = d.transaction_id)
+          OR (
+            w.date BETWEEN d.date - INTERVAL '8 hours' AND d.date + INTERVAL '8 hours'
+            AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
+          )
+        )
       WHERE d.amount > 0
         AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1966','1971','1975')
         AND d.contra_account IS NULL
         ${dateFilter('d')}
-      ORDER BY d.id, ABS(EXTRACT(EPOCH FROM (d.date - w.date)))
+      ORDER BY d.id,
+        CASE WHEN w.transaction_id IS NOT NULL AND d.transaction_id IS NOT NULL AND w.transaction_id = d.transaction_id THEN 0 ELSE 1 END,
+        ABS(EXTRACT(EPOCH FROM (d.date - w.date)))
     `);
 
     // Find withdrawal↔deposit pairs where withdrawal has no contra_account
@@ -724,14 +731,21 @@ router.post('/auto-contra', async (req, res) => {
         AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1966','1971','1975')
         AND d.account != w.account
-        AND d.date BETWEEN w.date - INTERVAL '8 hours' AND w.date + INTERVAL '8 hours'
-        AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
+        AND (
+          (w.transaction_id IS NOT NULL AND d.transaction_id IS NOT NULL AND w.transaction_id = d.transaction_id)
+          OR (
+            d.date BETWEEN w.date - INTERVAL '8 hours' AND w.date + INTERVAL '8 hours'
+            AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
+          )
+        )
       WHERE w.amount < 0
         AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.contra_account IS NULL
         ${dateFilter('w')}
-      ORDER BY w.id, ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
+      ORDER BY w.id,
+        CASE WHEN w.transaction_id IS NOT NULL AND d.transaction_id IS NOT NULL AND w.transaction_id = d.transaction_id THEN 0 ELSE 1 END,
+        ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
     `);
 
     const allWork = [

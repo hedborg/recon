@@ -838,6 +838,7 @@
               <th class="sortable" data-col="amount"   data-table="bn" id="th-change">Amount <span class="sort-icon">↕</span></th>
               <th class="sortable" data-col="sek"      data-table="bn" id="th-sek">≈ SEK <span class="sort-icon">↕</span></th>
               <th class="sortable" data-col="remark"   data-table="bn">Remark <span class="sort-icon">↕</span></th>
+              <th class="sortable" data-col="txid"     data-table="bn">Transaction ID <span class="sort-icon">↕</span></th>
               <th style="min-width:130px">Contra Acct</th>
               <th style="min-width:160px">Voucher Text</th>
             </tr>
@@ -1391,7 +1392,8 @@ function renderStatements(rows) {
       case 'date':     return String(a.date).localeCompare(String(b.date)) * mul;
       case 'type':     return String(a.type || '').localeCompare(String(b.type || '')) * mul;
       case 'currency': return String(a.currency || '').localeCompare(String(b.currency || '')) * mul;
-      case 'remark':   return String(a.remark || a.transaction_id || '').localeCompare(String(b.remark || b.transaction_id || '')) * mul;
+      case 'remark':   return String(a.remark || '').localeCompare(String(b.remark || '')) * mul;
+      case 'txid':     return String(a.transaction_id || '').localeCompare(String(b.transaction_id || '')) * mul;
       case 'sek':      return ((a._sek ?? -Infinity) - (b._sek ?? -Infinity)) * mul;
       case 'amount':   return (parseFloat(a.amount) - parseFloat(b.amount)) * mul;
       default:         return 0;
@@ -1432,7 +1434,8 @@ function renderStatements(rows) {
       <td>${esc(r.currency)}</td>
       <td class="num" style="color:${amtColor}">${fmtNum8(r.amount)}</td>
       <td class="num">${sekDisplay}</td>
-      <td class="muted" title="${esc(r.remark || r.transaction_id)}">${esc(truncate(r.remark || r.transaction_id, 28))}</td>
+      <td class="muted" title="${esc(r.remark)}">${esc(truncate(r.remark, 28))}</td>
+      <td class="muted" title="${esc(r.transaction_id)}">${esc(truncate(r.transaction_id, 20))}</td>
       <td class="ca-cell"><select class="acct-select"><option value="">—</option>${acctOptions}</select></td>
       <td class="vt-cell"><input class="voucher-input" type="text" value="${esc(r.voucher_text || '')}" placeholder="voucher text"></td>
     `;

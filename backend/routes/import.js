@@ -671,7 +671,7 @@ router.post('/hotwallet', upload.single('file'), async (req, res) => {
         const key = `${ts}|${currency}|${amount}|${sweepType}`;
         if (existingSet.has(key)) { skipped++; continue; }
         await client.query(`
-          INSERT INTO stg_statements (source, account, date, type, subtype, currency, amount, remark, voucher_text)
+          INSERT INTO stg_statements (source, account, date, type, subtype, currency, amount, transaction_id, voucher_text)
           VALUES ('HotWallet', '1580', $1, $2, $3, $4, $5, $6, $7)
         `, [ts, txType, sweepType, currency, amount, txid || null, dest || null]);
         imported++;
