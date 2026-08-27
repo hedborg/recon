@@ -693,7 +693,30 @@ router.post('/auto-contra', async (req, res) => {
       return parts.length ? 'AND ' + parts.join(' AND ') : '';
     };
 
-    // ── Pass 1: txid exact match (uses index, very fast) ────────────────────
+    // ── Pass 1a: Hot Wallet txid match — with cross-month transit detection ──
+    // Returns both sides so we can tag both with 1585 when months differ
+    const { rows: hwTxidMatches } = await pool.query(`
+      SELECT DISTINCT ON (w.id)
+        w.id AS w_id, w.date AS w_date,
+        d.id AS d_id, d.date AS d_date,
+        d.account::integer AS d_account
+      FROM stg_statements w
+      JOIN stg_statements d ON d.transaction_id = w.transaction_id
+        AND d.transaction_id IS NOT NULL
+        AND d.amount > 0
+        AND LOWER(d.type) = 'deposit'
+        AND d.account = '1963'
+      WHERE w.account = '1580'
+        AND w.currency = 'BTC'
+        AND w.amount < 0
+        AND LOWER(w.type) = 'withdrawal'
+        AND w.contra_account IS NULL
+        AND w.transaction_id IS NOT NULL
+        ${dateFilter('w')}
+      ORDER BY w.id
+    `);
+
+    // ── Pass 1b: txid exact match for all other accounts ─────────────────────
     const { rows: txidDeposits } = await pool.query(`
       SELECT DISTINCT ON (d.id)
         d.id AS deposit_id, w.account::integer AS suggested_contra
@@ -704,6 +727,7 @@ router.post('/auto-contra', async (req, res) => {
         AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.account != d.account
+        AND NOT (w.account = '1580' AND d.account = '1963')
       WHERE d.amount > 0
         AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1963','1966','1971','1975')
@@ -723,6 +747,7 @@ router.post('/auto-contra', async (req, res) => {
         AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1963','1966','1971','1975')
         AND d.account != w.account
+        AND NOT (w.account = '1580' AND d.account = '1963')
       WHERE w.amount < 0
         AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
@@ -732,8 +757,10 @@ router.post('/auto-contra', async (req, res) => {
       ORDER BY w.id
     `);
 
-    // Collect ids already handled by txid pass so time/amount pass skips them
+    // Collect ids already handled by txid passes so time/amount pass skips them
     const txidMatchedIds = new Set([
+      ...hwTxidMatches.map(r => r.w_id),
+      ...hwTxidMatches.map(r => r.d_id),
       ...txidDeposits.map(r => r.deposit_id),
       ...txidWithdrawals.map(r => r.withdrawal_id),
     ]);
@@ -779,7 +806,19 @@ router.post('/auto-contra', async (req, res) => {
       ORDER BY w.id, ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
     `);
 
+    // Hot Wallet cross-month pairs: tag both sides with 1585, same-month with real account
+    const hwWork = hwTxidMatches.flatMap(r => {
+      const crossMonth = new Date(r.w_date).getMonth() !== new Date(r.d_date).getMonth()
+                      || new Date(r.w_date).getFullYear() !== new Date(r.d_date).getFullYear();
+      const contra = crossMonth ? 1585 : r.d_account;
+      return [
+        { id: r.w_id, contra },
+        { id: r.d_id, contra },
+      ];
+    });
+
     const allWork = [
+      ...hwWork,
       ...txidDeposits.map(r => ({ id: r.deposit_id, contra: r.suggested_contra })),
       ...txidWithdrawals.map(r => ({ id: r.withdrawal_id, contra: r.suggested_contra })),
       ...depositMatches.filter(r => !txidMatchedIds.has(r.deposit_id)).map(r => ({ id: r.deposit_id, contra: r.suggested_contra })),

@@ -186,6 +186,7 @@ async function migrate() {
     [3100, 'Gross Product Value'],
     [2423, 'Store Credit'],
     [1982, 'SAFE Wallet'],
+    [1585, 'BTC in Transit'],
     [1951, 'Lightspark USD'],
   ];
   for (const [num, name] of seedAccounts) {
