@@ -801,7 +801,7 @@ router.post('/auto-contra', async (req, res) => {
         AND d.account IN ('1963','1966','1971','1975')
         AND d.contra_account IS NULL
         ${dateFilter('d')}
-      ORDER BY d.id, ABS(EXTRACT(EPOCH FROM (d.date - w.date)))
+      ORDER BY d.id, ABS(ABS(w.amount) - d.amount), ABS(EXTRACT(EPOCH FROM (d.date - w.date)))
     `);
 
     const { rows: withdrawalMatches } = await pool.query(`
@@ -821,7 +821,7 @@ router.post('/auto-contra', async (req, res) => {
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.contra_account IS NULL
         ${dateFilter('w')}
-      ORDER BY w.id, ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
+      ORDER BY w.id, ABS(ABS(w.amount) - d.amount), ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
     `);
 
     // Hot Wallet cross-month pairs: tag both sides with 1585, same-month with real account
