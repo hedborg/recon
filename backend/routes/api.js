@@ -41,6 +41,7 @@ router.get('/unmatched/statements', async (req, res) => {
       SELECT s.id, s.date, s.source, s.account, s.type, s.subtype,
              s.currency, s.amount, s.fee, s.transaction_id, s.remark,
              s.contra_account, s.contra_source, s.voucher_text,
+             s.excluded, s.excluded_reason,
              (m.statement_id IS NOT NULL) AS is_matched
       FROM stg_statements s
       LEFT JOIN (SELECT DISTINCT statement_id FROM recon_matches) m ON m.statement_id = s.id
@@ -48,6 +49,7 @@ router.get('/unmatched/statements', async (req, res) => {
         AND ($2::date IS NULL OR DATE(s.date) >= $2::date)
         AND ($3::date IS NULL OR DATE(s.date) <= $3::date)
         AND ($4 OR m.statement_id IS NULL)
+        AND s.excluded IS NOT TRUE
       ORDER BY s.date DESC
     `, [account, from || null, to || null, showAll]);
     res.json(rows);
@@ -178,6 +180,20 @@ router.patch('/statements/:id', async (req, res) => {
   values.push(req.params.id);
   try {
     await pool.query(`UPDATE stg_statements SET ${updates.join(', ')} WHERE id = $${i}`, values);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/statements/:id  — soft-delete (exclude) a statement row
+// ---------------------------------------------------------------------------
+router.delete('/statements/:id', async (req, res) => {
+  const { reason } = req.body || {};
+  try {
+    await pool.query(
+      `UPDATE stg_statements SET excluded = true, excluded_reason = $1 WHERE id = $2`,
+      [reason || null, req.params.id]
+    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -712,6 +728,7 @@ router.post('/auto-contra', async (req, res) => {
         AND LOWER(w.type) = 'withdrawal'
         AND w.contra_account IS NULL
         AND w.transaction_id IS NOT NULL
+        AND w.excluded IS NOT TRUE
         ${dateFilter('w')}
       ORDER BY w.id
     `);
@@ -753,6 +770,7 @@ router.post('/auto-contra', async (req, res) => {
         AND w.account IN ('1963','1971','1975','1966','1580')
         AND w.contra_account IS NULL
         AND w.transaction_id IS NOT NULL
+        AND w.excluded IS NOT TRUE
         ${dateFilter('w')}
       ORDER BY w.id
     `);

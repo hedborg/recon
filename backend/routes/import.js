@@ -658,6 +658,7 @@ router.post('/hotwallet', upload.single('file'), async (req, res) => {
     // Dedup by (date, currency, amount, subtype) — no unique tx ID in this export
     const { rows: existing } = await pool.query(
       `SELECT date, currency, amount::text, subtype FROM stg_statements WHERE source = 'HotWallet' AND account = '1580'`
+      // includes excluded=true rows intentionally — prevents reimporting soft-deleted rows
     );
     const existingSet = new Set(existing.map(r =>
       `${new Date(r.date).toISOString()}|${r.currency}|${parseFloat(r.amount)}|${r.subtype}`

@@ -197,9 +197,11 @@ async function migrate() {
   }
 
   // ── M6: contra_account + voucher_text on stg_statements ─────────
-  await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS contra_account INTEGER REFERENCES chart_of_accounts(account_number)`);
-  await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS voucher_text   TEXT`);
-  await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS contra_source  TEXT`);
+  await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS contra_account  INTEGER REFERENCES chart_of_accounts(account_number)`);
+  await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS voucher_text    TEXT`);
+  await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS contra_source   TEXT`);
+  await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS excluded        BOOLEAN NOT NULL DEFAULT false`);
+  await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS excluded_reason TEXT`);
 
   console.log('Migrations OK');
 }
