@@ -1,0 +1,4 @@
+recon.businesscontrol.se {
+  header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  reverse_proxy app:3000
+}
