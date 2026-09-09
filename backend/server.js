@@ -1,17 +1,39 @@
-const express = require('express');
-const path    = require('path');
-const pool    = require('./db');
+const express    = require('express');
+const path       = require('path');
+const session    = require('express-session');
+const pgSession  = require('connect-pg-simple')(session);
+const pool       = require('./db');
+const { router: authRouter, requireAuth } = require('./routes/auth');
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use((req, _res, next) => { console.log(req.method, req.url); next(); });
+
+if (!process.env.SESSION_SECRET) {
+  console.warn('WARNING: SESSION_SECRET is not set — using insecure default.');
+}
+
+app.use(session({
+  store: new pgSession({ pool, createTableIfMissing: true }),
+  secret: process.env.SESSION_SECRET || 'dev-only-insecure-secret-change-me',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.COOKIE_SECURE === 'true',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+  },
+}));
 
 // PUBLIC_DIR can be overridden; Docker mounts frontend at /app/public
 const publicDir = process.env.PUBLIC_DIR || path.join(__dirname, '..', 'frontend');
 app.use(express.static(publicDir));
 
-app.use('/import',  require('./routes/import'));
-app.use('/api',     require('./routes/api'));
+app.use('/api',     authRouter);                       // /api/login, /api/logout, /api/session — public
+app.use('/import',  requireAuth, require('./routes/import'));
+app.use('/api',     requireAuth, require('./routes/api'));
 
 const PORT = process.env.PORT || 3000;
 
@@ -202,6 +224,17 @@ async function migrate() {
   await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS contra_source   TEXT`);
   await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS excluded        BOOLEAN NOT NULL DEFAULT false`);
   await pool.query(`ALTER TABLE stg_statements ADD COLUMN IF NOT EXISTS excluded_reason TEXT`);
+
+  // ── M7: users table ─────────────────────────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            SERIAL PRIMARY KEY,
+      name          TEXT NOT NULL UNIQUE,
+      password_hash TEXT,
+      active        BOOLEAN NOT NULL DEFAULT true,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
   console.log('Migrations OK');
 }

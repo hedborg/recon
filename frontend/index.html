@@ -583,6 +583,23 @@
 </head>
 <body>
 
+<!-- ── Login overlay ─────────────────────────────────────────────── -->
+<div id="login-overlay" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:9000;align-items:center;justify-content:center;">
+  <div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:12px;padding:40px;width:320px;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+    <div style="font-size:20px;font-weight:700;margin-bottom:24px;color:var(--text-header);text-align:center;">Recon</div>
+    <div id="login-error" style="display:none;color:#ef4444;font-size:13px;margin-bottom:12px;text-align:center;"></div>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">Name</label>
+      <input id="login-name" type="text" autocomplete="username" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font-size:14px;">
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font-size:14px;">
+    </div>
+    <button id="login-btn" class="btn" style="width:100%;padding:10px;font-size:14px;">Sign in</button>
+  </div>
+</div>
+
 <header>
   <h1>Fortnox ↔ Statements Reconciliation</h1>
 
@@ -658,6 +675,8 @@
     <span id="fx-status" style="font-size:11px;color:var(--text-date);min-width:140px;"></span>
   </div>
   <button class="btn-filter" id="btn-theme" title="Toggle light/dark theme">☀ Light</button>
+  <span id="session-user" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
+  <button class="btn-filter" id="btn-logout" style="display:none;" title="Sign out">Sign out</button>
 </header>
 
 <div class="tab-bar">
@@ -898,6 +917,74 @@
 <div id="toast"></div>
 
 <script>
+// ── Auth ─────────────────────────────────────────────────────────
+(async function initAuth() {
+  const overlay  = document.getElementById('login-overlay');
+  const nameIn   = document.getElementById('login-name');
+  const passIn   = document.getElementById('login-password');
+  const loginBtn = document.getElementById('login-btn');
+  const errEl    = document.getElementById('login-error');
+  const logoutBtn= document.getElementById('btn-logout');
+  const userSpan = document.getElementById('session-user');
+
+  async function checkSession() {
+    const r = await fetch('/api/session');
+    if (r.ok) {
+      const u = await r.json();
+      userSpan.textContent = u.name;
+      logoutBtn.style.display = '';
+      overlay.style.display = 'none';
+    } else {
+      overlay.style.display = 'flex';
+      setTimeout(() => nameIn.focus(), 50);
+    }
+  }
+
+  async function doLogin() {
+    errEl.style.display = 'none';
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Signing in…';
+    try {
+      const r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nameIn.value.trim(), password: passIn.value }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        errEl.textContent = data.error || 'Login failed';
+        errEl.style.display = 'block';
+        passIn.value = '';
+        passIn.focus();
+      } else {
+        userSpan.textContent = data.name;
+        logoutBtn.style.display = '';
+        overlay.style.display = 'none';
+      }
+    } catch(_) {
+      errEl.textContent = 'Network error';
+      errEl.style.display = 'block';
+    }
+    loginBtn.disabled = false;
+    loginBtn.textContent = 'Sign in';
+  }
+
+  loginBtn.addEventListener('click', doLogin);
+  passIn.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  nameIn.addEventListener('keydown', e => { if (e.key === 'Enter') passIn.focus(); });
+
+  logoutBtn.addEventListener('click', async () => {
+    await fetch('/api/logout', { method: 'POST' });
+    userSpan.textContent = '';
+    logoutBtn.style.display = 'none';
+    passIn.value = '';
+    overlay.style.display = 'flex';
+    setTimeout(() => nameIn.focus(), 50);
+  });
+
+  await checkSession();
+})();
+
 // ── State ────────────────────────────────────────────────────────
 let selectedFns   = new Map();
 let selectedBns   = new Map();
