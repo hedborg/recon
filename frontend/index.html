@@ -684,6 +684,7 @@
   <button class="tab-btn"        data-tab="fx">📈 FX Rates</button>
   <button class="tab-btn"        data-tab="reval">📉 FX Revaluation</button>
   <button class="tab-btn"        data-tab="accounts">⚙ Accounts</button>
+  <button class="tab-btn"        data-tab="users">👤 Users</button>
 </div>
 
 <div class="main">
@@ -756,6 +757,23 @@
   <div id="accounts-table-wrap"></div>
 </div>
 <!-- ═══════════════════════════════════════════════════════════════ -->
+
+<!-- ═══════════════════════ USERS TAB ════════════════════════════ -->
+<div class="tab-content" id="tab-users" style="padding:16px;overflow:auto;flex-direction:column;">
+  <div style="max-width:480px;">
+    <h3 style="margin:0 0 16px;color:var(--text-header);font-size:15px;">User Management</h3>
+    <div id="users-list" style="margin-bottom:24px;"></div>
+    <div style="border-top:1px solid var(--border);padding-top:16px;">
+      <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em;">Add user</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <input id="user-new-name" type="text" placeholder="Name" style="flex:1;min-width:120px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:6px 10px;border-radius:4px;font-size:13px;">
+        <input id="user-new-pw" type="password" placeholder="Password" autocomplete="new-password" style="flex:1;min-width:150px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:6px 10px;border-radius:4px;font-size:13px;">
+        <button id="user-add-btn" class="btn" style="padding:6px 14px;font-size:13px;">Add</button>
+      </div>
+      <div id="user-add-error" style="display:none;color:#ef4444;font-size:12px;margin-top:6px;"></div>
+    </div>
+  </div>
+</div>
 
 <div class="tab-content active" id="tab-recon" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
   <div class="top-panels">
@@ -2458,6 +2476,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById(id).classList.add('active');
     if (btn.dataset.tab === 'fx') loadFxView();
     if (btn.dataset.tab === 'accounts') loadAccountsView();
+    if (btn.dataset.tab === 'users')    loadUsersView();
   });
 });
 
@@ -2793,6 +2812,71 @@ function renderCoverage(coverage, allCoins) {
     applyTheme(next);
   });
 })();
+
+// ── Users admin ───────────────────────────────────────────────────
+let usersData = [];
+
+function renderUsersRow(u) {
+  return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+    <span style="flex:1;font-size:13px;color:var(--text-header);">${esc(u.name)}</span>
+    <span style="font-size:11px;color:${u.has_password ? 'var(--text-muted)' : '#f59e0b'};">${u.has_password ? '●●●●●●' : 'no password'}</span>
+    <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+      <input type="checkbox" data-user-active="${u.id}" ${u.active ? 'checked' : ''}> active
+    </label>
+    <input type="password" data-user-pw="${u.id}" placeholder="New password" autocomplete="new-password"
+      style="width:140px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:4px 8px;border-radius:4px;font-size:12px;">
+    <button class="btn-filter" data-user-set-pw="${u.id}" style="font-size:12px;padding:3px 10px;">Set</button>
+  </div>`;
+}
+
+async function loadUsersView() {
+  const list = document.getElementById('users-list');
+  list.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">Loading…</span>';
+  const r = await fetch('/api/users');
+  usersData = await r.json();
+  list.innerHTML = usersData.map(renderUsersRow).join('') || '<span style="color:var(--text-muted);font-size:13px;">No users.</span>';
+}
+
+document.getElementById('users-list').addEventListener('change', async e => {
+  const userId = e.target.dataset.userActive;
+  if (!userId) return;
+  await fetch(`/api/users/${userId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active: e.target.checked }),
+  });
+});
+
+document.getElementById('users-list').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-user-set-pw]');
+  if (!btn) return;
+  const userId = btn.dataset.userSetPw;
+  const input = document.querySelector(`[data-user-pw="${userId}"]`);
+  const password = input.value.trim();
+  if (!password) return;
+  const r = await fetch(`/api/users/${userId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  if (!r.ok) { const d = await r.json(); alert(d.error); return; }
+  input.value = '';
+  await loadUsersView();
+});
+
+document.getElementById('user-add-btn').addEventListener('click', async () => {
+  const nameEl  = document.getElementById('user-new-name');
+  const pwEl    = document.getElementById('user-new-pw');
+  const errEl   = document.getElementById('user-add-error');
+  errEl.style.display = 'none';
+  const name = nameEl.value.trim();
+  if (!name) { errEl.textContent = 'Name is required'; errEl.style.display = 'block'; return; }
+  const r = await fetch('/api/users', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, password: pwEl.value || null }),
+  });
+  if (!r.ok) { const d = await r.json(); errEl.textContent = d.error; errEl.style.display = 'block'; return; }
+  nameEl.value = ''; pwEl.value = '';
+  await loadUsersView();
+});
 </script>
 </body>
 </html>

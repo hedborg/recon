@@ -1,7 +1,56 @@
 const express = require('express');
+const bcrypt  = require('bcryptjs');
 const pool    = require('../db');
 const { getRateSek, getRatesBatch, startRefresh, refreshState } = require('../fx');
 const router  = express.Router();
+
+// ---------------------------------------------------------------------------
+// Users admin
+// ---------------------------------------------------------------------------
+const USER_COLS = `id, name, active, created_at, (password_hash IS NOT NULL) AS has_password`;
+
+router.get('/users', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT ${USER_COLS} FROM users ORDER BY name`);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/users', async (req, res) => {
+  const { name, password } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (password && password.length < 8) return res.status(400).json({ error: 'password must be at least 8 characters' });
+  const hash = password ? await bcrypt.hash(password, 12) : null;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO users (name, password_hash) VALUES ($1, $2) RETURNING ${USER_COLS}`,
+      [name, hash],
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch('/users/:id', async (req, res) => {
+  const { name, active, password } = req.body;
+  if (password !== undefined && password !== null && password.length < 8)
+    return res.status(400).json({ error: 'password must be at least 8 characters' });
+  const hash = password ? await bcrypt.hash(password, 12) : undefined;
+  const updates = [], values = [];
+  let i = 1;
+  if (name     !== undefined) { updates.push(`name          = $${i++}`); values.push(name); }
+  if (active   !== undefined) { updates.push(`active        = $${i++}`); values.push(active); }
+  if (hash     !== undefined) { updates.push(`password_hash = $${i++}`); values.push(hash); }
+  if (!updates.length) return res.status(400).json({ error: 'nothing to update' });
+  values.push(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = $${i} RETURNING ${USER_COLS}`,
+      values,
+    );
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ---------------------------------------------------------------------------
 // GET /api/unmatched/fortnox?from=&to=&account=1971&show=all
