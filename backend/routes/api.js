@@ -877,10 +877,9 @@ router.post('/auto-contra', async (req, res) => {
     const hwWork = hwTxidMatches.flatMap(r => {
       const crossMonth = new Date(r.w_date).getMonth() !== new Date(r.d_date).getMonth()
                       || new Date(r.w_date).getFullYear() !== new Date(r.d_date).getFullYear();
-      const contra = crossMonth ? 1585 : r.d_account;
       return [
-        { id: r.w_id, contra },
-        { id: r.d_id, contra },
+        { id: r.w_id, contra: crossMonth ? 1585 : r.d_account }, // 1580 withdrawal → 1963 (or 1585)
+        { id: r.d_id, contra: crossMonth ? 1585 : 1580 },        // 1963 deposit → 1580 (or 1585)
       ];
     });
 
