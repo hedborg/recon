@@ -160,12 +160,23 @@
   }
 
   .top-panels {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
     flex: 1;
     overflow: hidden;
     border-bottom: 2px solid var(--border-panel);
   }
+  .top-panels .panel { overflow: hidden; display: flex; flex-direction: column; }
+  #panel-fortnox { flex: 0 0 var(--split-left, 50%); }
+  #panel-binance  { flex: 1 1 0; min-width: 200px; }
+
+  .split-handle {
+    width: 5px;
+    background: var(--border-panel);
+    cursor: col-resize;
+    flex-shrink: 0;
+    transition: background .15s;
+  }
+  .split-handle:hover, .split-handle.dragging { background: var(--text-accent); }
 
   /* ── Panel ───────────────────────────────────────────────────── */
   .panel {
@@ -819,6 +830,8 @@
       </div>
     </div>
 
+    <div class="split-handle" id="split-handle"></div>
+
     <!-- Right: Statements -->
     <div class="panel" id="panel-binance">
       <div class="panel-header">
@@ -1028,6 +1041,44 @@ let bnRows        = [];
 let fnRows        = [];
 let smartFilter   = null;
 let activeAccount = '1976';   // currently selected account (Fortnox konto)
+
+// ── Draggable panel splitter ─────────────────────────────────────
+(function() {
+  const STORAGE_KEY = 'recon-split-pct';
+  function applyPct(pct) {
+    pct = Math.max(15, Math.min(85, pct));
+    document.documentElement.style.setProperty('--split-left', pct + '%');
+  }
+  try { applyPct(parseFloat(localStorage.getItem(STORAGE_KEY)) || 50); } catch(_) { applyPct(50); }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const handle = document.getElementById('split-handle');
+    const container = handle.parentElement;
+    let dragging = false;
+
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault();
+      dragging = true;
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const rect = container.getBoundingClientRect();
+      const pct = (e.clientX - rect.left) / rect.width * 100;
+      applyPct(pct);
+    });
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try { localStorage.setItem(STORAGE_KEY, parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--split-left'))); } catch(_) {}
+    });
+  });
+})();
 
 // ── Deep-link: sync filters ↔ URL ────────────────────────────────
 function syncURL() {
