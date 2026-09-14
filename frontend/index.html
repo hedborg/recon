@@ -890,8 +890,8 @@
               <th class="sortable" data-col="remark"   data-table="bn">Remark <span class="sort-icon">↕</span></th>
               <th class="sortable" data-col="txid"     data-table="bn">Transaction ID <span class="sort-icon">↕</span></th>
               <th style="min-width:130px">Contra Acct</th>
+              <th style="min-width:160px;width:100%">Voucher Text</th>
               <th style="width:28px"></th>
-              <th style="min-width:160px">Voucher Text</th>
             </tr>
           </thead>
           <tbody id="bn-body"></tbody>
@@ -1644,7 +1644,7 @@ function renderStatements(rows) {
         <select class="acct-select"><option value="">—</option>${acctOptions}</select>
         ${r.contra_source === 'auto' ? '<span style="font-size:10px;color:#f59e0b;margin-left:3px" title="Set by Auto Contra">auto</span>' : r.contra_source === 'manual' ? '<span style="font-size:10px;color:#a78bfa;margin-left:3px" title="Set manually">manual</span>' : ''}
       </td>
-      <td class="vt-cell"><input class="voucher-input" type="text" value="${esc(r.voucher_text || '')}" placeholder="voucher text"></td>
+      <td class="vt-cell" style="width:100%"><input class="voucher-input" type="text" value="${esc(r.voucher_text || '')}" placeholder="voucher text" style="width:100%"></td>
       <td class="del-cell" style="width:28px;text-align:center"><button class="btn-del-stmt" title="Exclude row" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:14px;padding:2px 4px">✕</button></td>
     `;
     tr.addEventListener('click', () => selectBn(r, tr));
