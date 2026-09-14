@@ -1029,12 +1029,39 @@ let fnRows        = [];
 let smartFilter   = null;
 let activeAccount = '1976';   // currently selected account (Fortnox konto)
 
+// ── Deep-link: sync filters ↔ URL ────────────────────────────────
+function syncURL() {
+  const p = new URLSearchParams();
+  if (activeAccount) p.set('account', activeAccount);
+  if (filterFrom)    p.set('from', filterFrom);
+  if (filterTo)      p.set('to', filterTo);
+  const type = document.getElementById('sf-type')?.value;
+  const curr = document.getElementById('sf-currency')?.value;
+  const contra = document.getElementById('sf-contra')?.value;
+  if (type)   p.set('type', type);
+  if (curr)   p.set('currency', curr);
+  if (contra) p.set('contra', contra);
+  history.replaceState(null, '', '?' + p.toString());
+}
+
+function readURLParams() {
+  const p = new URLSearchParams(location.search);
+  if (p.has('account')) activeAccount = p.get('account');
+  if (p.has('from'))    { filterFrom = p.get('from'); document.getElementById('filter-from').value = filterFrom; }
+  if (p.has('to'))      { filterTo   = p.get('to');   document.getElementById('filter-to').value   = filterTo;   }
+  // type/currency/contra are set after dropdowns populate — stash them
+  if (p.has('type'))     window._urlType    = p.get('type');
+  if (p.has('currency')) window._urlCurrency = p.get('currency');
+  if (p.has('contra'))   window._urlContra   = p.get('contra');
+}
+
 // ── Boot ─────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   // Pre-fill date inputs with last month's range
   document.getElementById('filter-from').value = filterFrom;
   document.getElementById('filter-to').value   = filterTo;
 
+  readURLParams();
   updateShowAllUI();
   refresh();
   loadAccountSwitcher();
@@ -1056,12 +1083,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-apply-filter').addEventListener('click', () => {
     filterFrom = document.getElementById('filter-from').value;
     filterTo   = document.getElementById('filter-to').value;
+    syncURL();
     refresh();
   });
   document.getElementById('btn-clear-filter').addEventListener('click', () => {
     filterFrom = ''; filterTo = '';
     document.getElementById('filter-from').value = '';
     document.getElementById('filter-to').value   = '';
+    syncURL();
     refresh();
   });
   ['filter-from','filter-to'].forEach(id =>
@@ -1072,7 +1101,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Statement-panel filters — instant, client-side only
   ['sf-type','sf-currency','sf-contra'].forEach(id =>
-    document.getElementById(id).addEventListener('change', () => renderStatements(bnRows))
+    document.getElementById(id).addEventListener('change', () => { syncURL(); renderStatements(bnRows); })
   );
   ['sf-amt-from','sf-amt-to','sf-sek-from','sf-sek-to'].forEach(id =>
     document.getElementById(id).addEventListener('input', () => renderStatements(bnRows))
@@ -1324,6 +1353,7 @@ async function loadAccountSwitcher() {
         loadOperations();
         loadCurrencies();
         clearSelection();
+        syncURL();
         refresh();
       });
       slot.appendChild(btn);
@@ -1335,9 +1365,11 @@ async function loadOperations() {
   try {
     const ops = await fetch(`/api/statements/operations?account=${activeAccount}`).then(r => r.json());
     const sel = document.getElementById('sf-type');
-    const cur = sel.value;
+    const cur = window._urlType ?? sel.value;
+    window._urlType = undefined;
     sel.innerHTML = '<option value="">All</option>' +
       ops.map(o => `<option value="${esc(o)}"${o === cur ? ' selected' : ''}>${esc(o)}</option>`).join('');
+    if (cur) renderStatements(bnRows);
   } catch(_) {}
 }
 
@@ -1345,9 +1377,11 @@ async function loadCurrencies() {
   try {
     const curs = await fetch(`/api/statements/currencies?account=${activeAccount}`).then(r => r.json());
     const sel  = document.getElementById('sf-currency');
-    const cur  = sel.value;
+    const cur  = window._urlCurrency ?? sel.value;
+    window._urlCurrency = undefined;
     sel.innerHTML = '<option value="">All</option>' +
       curs.map(c => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(c)}</option>`).join('');
+    if (cur) renderStatements(bnRows);
   } catch(_) {}
 }
 
