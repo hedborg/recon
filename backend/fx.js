@@ -27,7 +27,7 @@ const FIAT_CURRENCIES = new Map([
 const CG_IDS = {
   BTC:   'bitcoin',       ETH:   'ethereum',      BNB:   'binancecoin',
   SOL:   'solana',        ADA:   'cardano',        XRP:   'ripple',
-  DOT:   'polkadot',      MATIC: 'matic-network',  LINK:  'chainlink',
+  DOT:   'polkadot',      MATIC: 'polygon-ecosystem-token',  LINK:  'chainlink',
   LTC:   'litecoin',      BCH:   'bitcoin-cash',   AVAX:  'avalanche-2',
   ATOM:  'cosmos',        UNI:   'uniswap',        DOGE:  'dogecoin',
   TRX:   'tron',          ETC:   'ethereum-classic', XLM:  'stellar',
