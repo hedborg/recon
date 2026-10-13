@@ -323,6 +323,18 @@ async function migrate() {
   `);
   if (bootstrapped.length) console.log(`bootstrapped admin: ${bootstrapped.map((u) => u.name).join(', ')}`);
 
+  // ── M11: coin_mappings — DB-managed FX ticker mappings ──────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS coin_mappings (
+      ticker       TEXT PRIMARY KEY,
+      type         TEXT NOT NULL CHECK (type IN ('crypto','stablecoin','fiat')),
+      coingecko_id TEXT,
+      note         TEXT,
+      active       BOOLEAN NOT NULL DEFAULT true,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
   console.log('Migrations OK');
 }
 

@@ -695,6 +695,7 @@
   <button class="tab-btn"        data-tab="fx">📈 FX Rates</button>
   <button class="tab-btn"        data-tab="reval">📉 FX Revaluation</button>
   <button class="tab-btn"        data-tab="accounts">⚙ Accounts</button>
+  <button class="tab-btn"        data-tab="currencies">💱 Currencies</button>
   <button class="tab-btn"        data-tab="users">👤 Users</button>
 </div>
 
@@ -766,6 +767,24 @@
     <span id="acct-status" style="font-size:11px;color:var(--text-muted);"></span>
   </div>
   <div id="accounts-table-wrap"></div>
+</div>
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<!-- ════════════════════ CURRENCIES TAB ══════════════════════════ -->
+<div class="tab-content" id="tab-currencies" style="padding:16px;overflow:auto;flex-direction:column;">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px;">
+    <input type="text"   id="cur-new-ticker"   placeholder="Ticker (e.g. ARBETH)" style="width:120px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:12px;">
+    <select id="cur-new-type" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:12px;">
+      <option value="crypto">Crypto</option>
+      <option value="stablecoin">Stablecoin (USD-pegged)</option>
+      <option value="fiat">Fiat</option>
+    </select>
+    <input type="text"   id="cur-new-cgid"     placeholder="CoinGecko ID (e.g. ethereum)" style="width:200px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:12px;">
+    <input type="text"   id="cur-new-note"     placeholder="Note (optional)" style="flex:0 1 220px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-header);padding:3px 8px;border-radius:4px;font-size:12px;">
+    <button class="btn-filter" id="btn-cur-add">+ Add</button>
+    <span id="cur-status" style="font-size:11px;color:var(--text-muted);"></span>
+  </div>
+  <div id="currencies-table-wrap"></div>
 </div>
 <!-- ═══════════════════════════════════════════════════════════════ -->
 
@@ -2560,8 +2579,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const id = 'tab-' + btn.dataset.tab;
     document.getElementById(id).classList.add('active');
     if (btn.dataset.tab === 'fx') loadFxView();
-    if (btn.dataset.tab === 'accounts') loadAccountsView();
-    if (btn.dataset.tab === 'users')    loadUsersView();
+    if (btn.dataset.tab === 'accounts')   loadAccountsView();
+    if (btn.dataset.tab === 'currencies') loadCurrenciesView();
+    if (btn.dataset.tab === 'users')      loadUsersView();
   });
 });
 
@@ -2961,6 +2981,111 @@ document.getElementById('user-add-btn').addEventListener('click', async () => {
   if (!r.ok) { const d = await r.json(); errEl.textContent = d.error; errEl.style.display = 'block'; return; }
   nameEl.value = ''; pwEl.value = '';
   await loadUsersView();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Currencies view
+// ═══════════════════════════════════════════════════════════════════
+let coinMappings = [];
+
+async function loadCurrenciesView() {
+  coinMappings = await fetch('/api/coin-mappings').then(r => r.json());
+  renderCurrenciesTable();
+}
+
+function renderCurrenciesTable() {
+  const TYPE_LABEL = { crypto: 'Crypto', stablecoin: 'Stablecoin', fiat: 'Fiat' };
+  const groups = ['crypto', 'stablecoin', 'fiat'];
+  let html = `<table class="reval-table">
+    <thead><tr><th>Ticker</th><th>Type</th><th>CoinGecko ID</th><th>Note</th><th>Active</th></tr></thead><tbody>`;
+
+  for (const g of groups) {
+    const rows = coinMappings.filter(r => r.type === g).sort((a, b) => a.ticker.localeCompare(b.ticker));
+    if (!rows.length) continue;
+    html += `<tr class="subtotal"><td colspan="5" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;">${TYPE_LABEL[g]}</td></tr>`;
+    for (const r of rows) {
+      html += `<tr data-ticker="${esc(r.ticker)}">
+        <td style="font-weight:600;">${esc(r.ticker)}</td>
+        <td><select class="cur-type-sel" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-body);font-size:11px;border-radius:3px;padding:1px 4px;">
+          ${['crypto','stablecoin','fiat'].map(t => `<option value="${t}"${r.type===t?' selected':''}>${TYPE_LABEL[t]}</option>`).join('')}
+        </select></td>
+        <td><input class="cur-cgid-input" type="text" value="${esc(r.coingecko_id||'')}" placeholder="—" style="width:100%;background:transparent;border:1px solid transparent;color:var(--text-body);padding:2px 4px;border-radius:3px;font-size:12px;"></td>
+        <td><input class="cur-note-input" type="text" value="${esc(r.note||'')}" placeholder="—" style="width:100%;background:transparent;border:1px solid transparent;color:var(--text-body);padding:2px 4px;border-radius:3px;font-size:12px;"></td>
+        <td><button class="acct-btn${r.active?' active':''}" data-action="toggle-active">${r.active?'Active':'Inactive'}</button></td>
+      </tr>`;
+    }
+  }
+  html += `</tbody></table>`;
+
+  const wrap = document.getElementById('currencies-table-wrap');
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll('tr[data-ticker]').forEach(tr => {
+    const ticker = tr.dataset.ticker;
+    const patch  = (fields, el) => patchCoinMapping(ticker, fields, el);
+
+    const typeEl = tr.querySelector('.cur-type-sel');
+    typeEl.addEventListener('change', () => patch({ type: typeEl.value }, typeEl));
+
+    const cgidEl = tr.querySelector('.cur-cgid-input');
+    const cgidDebounce = debounce(() => patch({ coingecko_id: cgidEl.value || null }, cgidEl), 700);
+    cgidEl.addEventListener('input', cgidDebounce);
+    cgidEl.addEventListener('blur',  () => patch({ coingecko_id: cgidEl.value || null }, cgidEl));
+
+    const noteEl = tr.querySelector('.cur-note-input');
+    const noteDebounce = debounce(() => patch({ note: noteEl.value || null }, noteEl), 700);
+    noteEl.addEventListener('input', noteDebounce);
+    noteEl.addEventListener('blur',  () => patch({ note: noteEl.value || null }, noteEl));
+
+    const toggleBtn = tr.querySelector('[data-action="toggle-active"]');
+    toggleBtn.addEventListener('click', () => {
+      const nowActive = !toggleBtn.classList.contains('active');
+      patch({ active: nowActive }, toggleBtn).then(() => {
+        toggleBtn.classList.toggle('active', nowActive);
+        toggleBtn.textContent = nowActive ? 'Active' : 'Inactive';
+      });
+    });
+  });
+}
+
+async function patchCoinMapping(ticker, fields, el) {
+  try {
+    const res = await fetch(`/api/coin-mappings/${ticker}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) throw new Error();
+    const m = coinMappings.find(r => r.ticker === ticker);
+    if (m) Object.assign(m, fields);
+    el.classList.remove('save-err'); el.classList.add('save-ok');
+    setTimeout(() => el.classList.remove('save-ok'), 800);
+  } catch (_) {
+    el.classList.remove('save-ok'); el.classList.add('save-err');
+    setTimeout(() => el.classList.remove('save-err'), 1500);
+  }
+}
+
+document.getElementById('btn-cur-add').addEventListener('click', async () => {
+  const tickerEl = document.getElementById('cur-new-ticker');
+  const typeEl   = document.getElementById('cur-new-type');
+  const cgidEl   = document.getElementById('cur-new-cgid');
+  const noteEl   = document.getElementById('cur-new-note');
+  const statusEl = document.getElementById('cur-status');
+  const ticker = tickerEl.value.trim().toUpperCase();
+  if (!ticker) { statusEl.textContent = 'Ticker required'; return; }
+  try {
+    const res = await fetch('/api/coin-mappings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker, type: typeEl.value, coingecko_id: cgidEl.value.trim() || null, note: noteEl.value.trim() || null }),
+    });
+    if (!res.ok) { const d = await res.json(); statusEl.textContent = d.error; return; }
+    tickerEl.value = ''; cgidEl.value = ''; noteEl.value = '';
+    statusEl.textContent = `${ticker} added`;
+    setTimeout(() => { statusEl.textContent = ''; }, 2000);
+    await loadCurrenciesView();
+  } catch (_) { statusEl.textContent = 'Error saving'; }
 });
 </script>
 </body>

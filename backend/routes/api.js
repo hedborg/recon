@@ -248,6 +248,43 @@ router.delete('/statements/:id', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Coin mappings  — GET / POST / PATCH / DELETE
+// ---------------------------------------------------------------------------
+router.get('/coin-mappings', async (_req, res) => {
+  const { rows } = await pool.query(`SELECT ticker, type, coingecko_id, note, active FROM coin_mappings ORDER BY type, ticker`);
+  res.json(rows);
+});
+
+router.post('/coin-mappings', async (req, res) => {
+  const { ticker, type, coingecko_id, note } = req.body;
+  if (!ticker || !type) return res.status(400).json({ error: 'ticker and type are required' });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO coin_mappings (ticker, type, coingecko_id, note) VALUES (upper($1),$2,$3,$4)
+       ON CONFLICT (ticker) DO UPDATE SET type=$2, coingecko_id=$3, note=$4, active=true
+       RETURNING *`,
+      [ticker, type, coingecko_id || null, note || null],
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch('/coin-mappings/:ticker', async (req, res) => {
+  const fields = ['type','coingecko_id','note','active'].filter(f => req.body[f] !== undefined);
+  if (!fields.length) return res.status(400).json({ error: 'nothing to update' });
+  const sets = fields.map((f, i) => `${f} = $${i + 2}`).join(', ');
+  const vals = fields.map(f => req.body[f]);
+  try {
+    const { rows } = await pool.query(
+      `UPDATE coin_mappings SET ${sets} WHERE ticker = upper($1) RETURNING *`,
+      [req.params.ticker, ...vals],
+    );
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/accounts  — distinct accounts in stg_statements
 // ---------------------------------------------------------------------------
 router.get('/accounts', async (req, res) => {

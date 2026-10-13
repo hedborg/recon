@@ -11,33 +11,52 @@
 
 const pool = require('./db');
 
-const USD_STABLECOINS = new Set(['USDT','USDC','BUSD','DAI','TUSD','FDUSD','USDP','UST','USDT0POL','USDT0ARB','UDC']);
+// ── Hardcoded seed mappings (loaded into coin_mappings table on first run) ───
 
-// Fiat currencies handled by Frankfurter (base currency → SEK)
-// Add more as new exchanges bring new fiats
-const FIAT_CURRENCIES = new Map([
-  ['EUR', 'EUR'],
-  ['USD', 'USD'],
-  ['GBP', 'GBP'],
-  ['CHF', 'CHF'],
-  ['NOK', 'NOK'],
-  ['DKK', 'DKK'],
-]);
+const SEED_STABLECOINS = ['USDT','USDC','BUSD','DAI','TUSD','FDUSD','USDP','UST','USDT0POL','USDT0ARB','UDC'];
 
-const CG_IDS = {
-  BTC:   'bitcoin',       ETH:   'ethereum',      BNB:   'binancecoin',
-  SOL:   'solana',        ADA:   'cardano',        XRP:   'ripple',
-  DOT:   'polkadot',      MATIC: 'polygon-ecosystem-token',  LINK:  'chainlink',
-  LTC:   'litecoin',      BCH:   'bitcoin-cash',   AVAX:  'avalanche-2',
-  ATOM:  'cosmos',        UNI:   'uniswap',        DOGE:  'dogecoin',
-  TRX:   'tron',          ETC:   'ethereum-classic', XLM:  'stellar',
-  FIL:   'filecoin',      VET:   'vechain',          TON:  'the-open-network',
-  LNX:   'bitcoin',      // Bitfinex Lightning Network BTC — 1:1 with BTC
-  ARBETH: 'ethereum',   // Bitfinex ETH on Arbitrum — same price as ETH
-  DASH:  'dash',
-  POL:   'polygon-ecosystem-token', // Polygon — rebranded from MATIC to POL in 2024
-  SUI:   'sui',
+const SEED_FIAT = ['EUR','USD','GBP','CHF','NOK','DKK'];
+
+const SEED_CRYPTO = {
+  BTC:    'bitcoin',              ETH:    'ethereum',
+  BNB:    'binancecoin',         SOL:    'solana',
+  ADA:    'cardano',             XRP:    'ripple',
+  DOT:    'polkadot',            MATIC:  'polygon-ecosystem-token',
+  LINK:   'chainlink',           LTC:    'litecoin',
+  BCH:    'bitcoin-cash',        AVAX:   'avalanche-2',
+  ATOM:   'cosmos',              UNI:    'uniswap',
+  DOGE:   'dogecoin',            TRX:    'tron',
+  ETC:    'ethereum-classic',    XLM:    'stellar',
+  FIL:    'filecoin',            VET:    'vechain',
+  TON:    'the-open-network',    LNX:    'bitcoin',
+  ARBETH: 'ethereum',            DASH:   'dash',
+  POL:    'polygon-ecosystem-token', SUI: 'sui',
 };
+
+// ── Runtime maps — populated from DB by loadCoinMappings() ──────────────────
+
+let USD_STABLECOINS  = new Set(SEED_STABLECOINS);
+let FIAT_CURRENCIES  = new Map(SEED_FIAT.map(c => [c, c]));
+let CG_IDS           = { ...SEED_CRYPTO };
+
+async function loadCoinMappings() {
+  try {
+    const { rows } = await pool.query(`SELECT ticker, type, coingecko_id FROM coin_mappings WHERE active = true`);
+    USD_STABLECOINS = new Set(SEED_STABLECOINS);
+    FIAT_CURRENCIES = new Map(SEED_FIAT.map(c => [c, c]));
+    CG_IDS          = { ...SEED_CRYPTO };
+    for (const r of rows) {
+      if (r.type === 'stablecoin') USD_STABLECOINS.add(r.ticker);
+      else if (r.type === 'fiat')  FIAT_CURRENCIES.set(r.ticker, r.ticker);
+      else if (r.type === 'crypto' && r.coingecko_id) CG_IDS[r.ticker] = r.coingecko_id;
+    }
+  } catch (e) {
+    console.warn('loadCoinMappings failed (table may not exist yet):', e.message);
+  }
+}
+
+// Call once at startup; the refresh job also calls it before each run
+loadCoinMappings();
 
 // Memory cache: "COIN:YYYY-MM-DD" → rate (only positive values stored)
 const memCache = {};
@@ -110,6 +129,7 @@ async function startRefresh() {
     (byCoin[coin] = byCoin[coin] || []).push(rate_date);
   }
 
+  await loadCoinMappings();
   refreshState.running   = true;
   refreshState.total     = missing.length;
   refreshState.done      = 0;
@@ -311,4 +331,4 @@ function expandDateRange(from, to) {
   return dates;
 }
 
-module.exports = { getRateSek, getRatesBatch, startRefresh, refreshState, USD_STABLECOINS, FIAT_CURRENCIES };
+module.exports = { getRateSek, getRatesBatch, startRefresh, refreshState, loadCoinMappings, USD_STABLECOINS, FIAT_CURRENCIES };
