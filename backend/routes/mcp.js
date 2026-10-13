@@ -148,6 +148,25 @@ function getServer(pool) {
     return { content: [{ type: 'text', text: JSON.stringify(rows[0], null, 2) }] };
   });
 
+  // ── create_match ─────────────────────────────────────────────────────────────
+  server.registerTool('create_match', {
+    description: 'Manually confirm a match between a Fortnox row and a statement row — identical to selecting both in the UI and pressing Confirm Match.',
+    inputSchema: {
+      fortnox_id:   z.number().describe('stg_fortnox row id (from get_unmatched_fortnox)'),
+      statement_id: z.number().describe('stg_statements row id (from get_unmatched_statements)'),
+      fx_rate_used: z.number().optional().describe('FX rate used (1 foreign currency unit = N SEK), if known'),
+      notes:        z.string().optional().describe('Optional notes'),
+    },
+  }, async ({ fortnox_id, statement_id, fx_rate_used, notes }) => {
+    const { rows } = await pool.query(
+      `INSERT INTO recon_matches (fortnox_id, statement_id, match_type, fx_rate_used, notes, matched_by)
+       VALUES ($1, $2, 'manual', $3, $4, 'mcp')
+       RETURNING id, fortnox_id, statement_id, match_type, fx_rate_used, notes, matched_by, matched_at`,
+      [fortnox_id, statement_id, fx_rate_used || null, notes || null],
+    );
+    return { content: [{ type: 'text', text: JSON.stringify(rows[0], null, 2) }] };
+  });
+
   // ── run_auto_contra ──────────────────────────────────────────────────────────
   server.registerTool('run_auto_contra', {
     description: 'Check the current Auto Contra status (running, total, done, tagged). To start a new run, use the Recon web UI — the run is long-lived and fire-and-forget.',
