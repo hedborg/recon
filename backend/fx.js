@@ -331,4 +331,4 @@ function expandDateRange(from, to) {
   return dates;
 }
 
-module.exports = { getRateSek, getRatesBatch, startRefresh, refreshState, loadCoinMappings, USD_STABLECOINS, FIAT_CURRENCIES };
+module.exports = { getRateSek, getRatesBatch, startRefresh, refreshState, loadCoinMappings, USD_STABLECOINS, FIAT_CURRENCIES, SEED_STABLECOINS, SEED_FIAT, SEED_CRYPTO };

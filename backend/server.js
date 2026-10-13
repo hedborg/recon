@@ -335,6 +335,18 @@ async function migrate() {
     )
   `);
 
+  // Seed from hardcoded lists — ON CONFLICT DO NOTHING so user edits are preserved
+  const { SEED_STABLECOINS, SEED_FIAT, SEED_CRYPTO } = require('./fx');
+  for (const ticker of SEED_STABLECOINS) {
+    await pool.query(`INSERT INTO coin_mappings (ticker, type) VALUES ($1, 'stablecoin') ON CONFLICT DO NOTHING`, [ticker]);
+  }
+  for (const ticker of SEED_FIAT) {
+    await pool.query(`INSERT INTO coin_mappings (ticker, type) VALUES ($1, 'fiat') ON CONFLICT DO NOTHING`, [ticker]);
+  }
+  for (const [ticker, cgId] of Object.entries(SEED_CRYPTO)) {
+    await pool.query(`INSERT INTO coin_mappings (ticker, type, coingecko_id) VALUES ($1, 'crypto', $2) ON CONFLICT DO NOTHING`, [ticker, cgId]);
+  }
+
   console.log('Migrations OK');
 }
 
