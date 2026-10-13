@@ -99,15 +99,16 @@ function getServer(pool) {
   }, async ({ account = '1971', from, to, show_all }) => {
     const params = [account];
     let where = 'WHERE f.konto = $1';
-    if (from)     { params.push(from); where += ` AND f.datum >= $${params.length}`; }
-    if (to)       { params.push(to);   where += ` AND f.datum <= $${params.length}::date + interval '1 day'`; }
+    if (from)     { params.push(from); where += ` AND f.bokforingsdatum >= $${params.length}`; }
+    if (to)       { params.push(to);   where += ` AND f.bokforingsdatum <= $${params.length}::date + interval '1 day'`; }
     if (!show_all) where += ` AND NOT EXISTS (SELECT 1 FROM recon_matches rm WHERE rm.fortnox_id = f.id)`;
 
     const { rows } = await pool.query(
-      `SELECT f.id, f.datum, f.konto, f.belopp, f.valuta, f.serie, f.vernr, f.text, f.antal
+      `SELECT f.id, f.bokforingsdatum AS date, f.konto, f.vernr, f.verifikationstext,
+              f.transaktionsinfo, f.debet, f.kredit, f.project_currency
        FROM stg_fortnox f
        ${where}
-       ORDER BY f.datum DESC`,
+       ORDER BY f.bokforingsdatum DESC`,
       params,
     );
     const summary = `${rows.length} Fortnox rows for account ${account}`;
