@@ -48,7 +48,7 @@ function getServer(pool) {
     inputSchema: {},
   }, async () => {
     const [fortnox, statements, matches] = await Promise.all([
-      pool.query(`SELECT account AS konto, COUNT(*) AS total FROM stg_fortnox GROUP BY account ORDER BY account`),
+      pool.query(`SELECT konto, COUNT(*) AS total FROM stg_fortnox GROUP BY konto ORDER BY konto`),
       pool.query(`SELECT account, source, COUNT(*) AS total FROM stg_statements GROUP BY account, source ORDER BY account`),
       pool.query(`SELECT match_type, COUNT(*) AS count FROM recon_matches GROUP BY match_type`),
     ]);
