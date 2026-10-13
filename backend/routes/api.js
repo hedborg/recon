@@ -772,21 +772,27 @@ router.get('/revaluation', async (req, res) => {
 // Also sets contra_account on the withdrawal if not already set.
 // Accepts optional from/to date params to limit scope.
 // ---------------------------------------------------------------------------
-const autoContraState = { running: false, total: 0, done: 0, tagged: 0, startedAt: null };
+const autoContraState = { running: false, total: 0, done: 0, tagged: 0, flagged: [], startedAt: null };
 
 router.get('/auto-contra/status', (_req, res) => res.json(autoContraState));
+
+// Map from HW remark keywords → account numbers
+const REMARK_ACCOUNT = { binance: 1971, kraken: 1966, bitfinex: 1975, operational: 1976 };
+
+// Currency alias normalisation (covers stablecoin variants + chain-rename aliases)
+function normCurrencySql(col) {
+  return `CASE
+    WHEN ${col} IN ('UST','USDT0ARB','USDT0POL','UDC','USDC','BUSD','DAI','TUSD','FDUSD','USDP') THEN 'USDT'
+    WHEN ${col} IN ('MATIC') THEN 'POL'
+    ELSE ${col}
+  END`;
+}
 
 router.post('/auto-contra', async (req, res) => {
   if (autoContraState.running) return res.json({ queued: true, ...autoContraState });
   const { from, to } = req.body || {};
   try {
-    // Normalize USD stablecoin variants to 'USDT' for cross-platform matching
-    // e.g. Hot Wallet uses USDT, Bitfinex uses UST/USDT0ARB/USDT0POL/UDC
-    const currencyNorm = `CASE
-      WHEN currency IN ('UST','USDT0ARB','USDT0POL','UDC','USDC','BUSD','DAI','TUSD','FDUSD','USDP')
-      THEN 'USDT'
-      ELSE currency
-    END`;
+    const currencyNorm = normCurrencySql('currency');
 
     const dateFilter = (alias) => {
       const parts = [];
@@ -875,7 +881,7 @@ router.post('/auto-contra', async (req, res) => {
         d.id AS deposit_id, w.account::integer AS suggested_contra
       FROM stg_statements d
       JOIN stg_statements w
-        ON (${currencyNorm.replace(/currency/g, 'w.currency')}) = (${currencyNorm.replace(/currency/g, 'd.currency')})
+        ON (${normCurrencySql('w.currency')}) = (${normCurrencySql('d.currency')})
         AND w.amount < 0
         AND LOWER(w.type) = 'withdrawal'
         AND w.account IN ('1963','1971','1975','1966','1580')
@@ -895,7 +901,7 @@ router.post('/auto-contra', async (req, res) => {
         w.id AS withdrawal_id, d.account::integer AS suggested_contra
       FROM stg_statements w
       JOIN stg_statements d
-        ON (${currencyNorm.replace(/currency/g, 'd.currency')}) = (${currencyNorm.replace(/currency/g, 'w.currency')})
+        ON (${normCurrencySql('d.currency')}) = (${normCurrencySql('w.currency')})
         AND d.amount > 0
         AND LOWER(d.type) = 'deposit'
         AND d.account IN ('1966','1971','1975')
@@ -909,6 +915,74 @@ router.post('/auto-contra', async (req, res) => {
         ${dateFilter('w')}
       ORDER BY w.id, ABS(ABS(w.amount) - d.amount), ABS(EXTRACT(EPOCH FROM (w.date - d.date)))
     `);
+
+    // ── Pass 3: HW extended window (0–10h) + remark-destination constraint ────
+    // For HW withdrawals still untagged after passes 1+2, look up to +10h forward.
+    // If HW remark names a destination (binance/kraken/bitfinex/operational),
+    // only consider candidates on that account. Skip (and flag) if the best
+    // candidate disagrees with the remark.
+    const pass2MatchedIds = new Set([
+      ...depositMatches.map(r => r.deposit_id),
+      ...withdrawalMatches.map(r => r.withdrawal_id),
+    ]);
+    const alreadyMatchedIds = new Set([...txidMatchedIds, ...pass2MatchedIds]);
+
+    const { rows: hwExtRows } = await pool.query(`
+      SELECT
+        w.id AS w_id, w.date AS w_date, w.amount AS w_amount, w.remark AS w_remark,
+        d.id AS d_id, d.date AS d_date, d.account AS d_account,
+        ABS(ABS(w.amount) - d.amount) AS amt_diff,
+        ABS(EXTRACT(EPOCH FROM (d.date - w.date))) AS lag_secs
+      FROM stg_statements w
+      JOIN stg_statements d
+        ON (${normCurrencySql('d.currency')}) = (${normCurrencySql('w.currency')})
+        AND d.amount > 0
+        AND LOWER(d.type) = 'deposit'
+        AND d.account IN ('1966','1971','1975')
+        AND d.contra_account IS NULL
+        AND d.date BETWEEN w.date AND w.date + INTERVAL '10 hours'
+        AND ABS(ABS(w.amount) - d.amount) / ABS(w.amount) < 0.001
+      WHERE w.account = '1580'
+        AND w.amount < 0
+        AND LOWER(w.type) = 'withdrawal'
+        AND w.contra_account IS NULL
+        AND w.excluded IS NOT TRUE
+        ${dateFilter('w')}
+      ORDER BY w.id, amt_diff, lag_secs
+    `);
+
+    // Group by w_id, apply remark constraint, skip ambiguous
+    const hwExtWork = [];
+    const hwExtFlagged = [];
+    const hwExtById = new Map();
+    for (const r of hwExtRows) {
+      if (alreadyMatchedIds.has(r.w_id)) continue;
+      if (!hwExtById.has(r.w_id)) hwExtById.set(r.w_id, []);
+      hwExtById.get(r.w_id).push(r);
+    }
+    for (const [wId, candidates] of hwExtById) {
+      const remark = (candidates[0].w_remark || '').toLowerCase();
+      const requiredAccount = Object.entries(REMARK_ACCOUNT).find(([kw]) => remark.includes(kw))?.[1];
+
+      // Filter to remark-matching candidates if remark names a destination
+      const filtered = requiredAccount
+        ? candidates.filter(c => parseInt(c.d_account) === requiredAccount)
+        : candidates;
+
+      if (filtered.length === 0) {
+        // Best candidate disagrees with remark — flag, don't tag
+        hwExtFlagged.push({ w_id: wId, remark, best_account: parseInt(candidates[0].d_account), required_account: requiredAccount });
+        continue;
+      }
+      if (filtered.length > 1) {
+        // Ambiguous — multiple candidates, skip
+        hwExtFlagged.push({ w_id: wId, remark, reason: 'ambiguous', candidates: filtered.length });
+        continue;
+      }
+      const best = filtered[0];
+      hwExtWork.push({ id: best.w_id,  contra: parseInt(best.d_account) });
+      hwExtWork.push({ id: best.d_id,  contra: 1580 });
+    }
 
     // Hot Wallet cross-month pairs: tag both sides with 1585, same-month with real account
     const hwWork = hwTxidMatches.flatMap(r => {
@@ -926,15 +1000,17 @@ router.post('/auto-contra', async (req, res) => {
       ...txidWithdrawals.map(r => ({ id: r.withdrawal_id, contra: r.suggested_contra })),
       ...depositMatches.filter(r => !txidMatchedIds.has(r.deposit_id)).map(r => ({ id: r.deposit_id, contra: r.suggested_contra })),
       ...withdrawalMatches.filter(r => !txidMatchedIds.has(r.withdrawal_id)).map(r => ({ id: r.withdrawal_id, contra: r.suggested_contra })),
+      ...hwExtWork,
     ];
 
     autoContraState.running   = true;
     autoContraState.total     = allWork.length;
     autoContraState.done      = 0;
     autoContraState.tagged    = 0;
+    autoContraState.flagged   = hwExtFlagged;
     autoContraState.startedAt = new Date().toISOString();
 
-    res.json({ started: true, total: allWork.length });
+    res.json({ started: true, total: allWork.length, flagged: hwExtFlagged });
 
     // Run updates in background
     (async () => {
