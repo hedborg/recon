@@ -917,4 +917,9 @@ router.post('/auto-contra', async (req, res) => {
   }
 });
 
+function getAutoContraState() {
+  return { ...autoContraState };
+}
+
 module.exports = router;
+module.exports.getAutoContraState = getAutoContraState;

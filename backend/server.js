@@ -2,8 +2,11 @@ const express    = require('express');
 const path       = require('path');
 const session    = require('express-session');
 const pgSession  = require('connect-pg-simple')(session);
+const { mcpAuthRouter } = require('@modelcontextprotocol/sdk/server/auth/router.js');
 const pool       = require('./db');
 const { router: authRouter, requireAuth } = require('./routes/auth');
+const { mountMcp } = require('./routes/mcp');
+const { createOAuthProvider } = require('./lib/oauth');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -31,20 +34,28 @@ app.use(session({
 const publicDir = process.env.PUBLIC_DIR || path.join(__dirname, '..', 'frontend');
 app.use(express.static(publicDir));
 
-// API key auth — allows MCP / server-to-server access without a session cookie
-function apiKeyAuth(req, _res, next) {
-  if (process.env.API_KEY && req.headers['x-api-key'] === process.env.API_KEY) {
-    req.apiKeyAuth = true;
-  }
-  next();
-}
+const PORT = process.env.PORT || 3000;
+const publicUrl = new URL(process.env.PUBLIC_URL || `http://localhost:${PORT}`);
+const mcpResourceUrl = new URL('/mcp', publicUrl);
 
-app.use(apiKeyAuth);
+const oauthProvider = createOAuthProvider(pool);
+app.use(mcpAuthRouter({
+  provider: oauthProvider,
+  issuerUrl: publicUrl,
+  resourceServerUrl: mcpResourceUrl,
+  resourceName: 'Recon',
+}));
+
+// Exempt icon lookups from the /mcp bearer-auth requirement
+app.get(['/mcp/favicon.ico', '/mcp/favicon.png', '/mcp/apple-touch-icon.png'], (req, res) => {
+  res.sendFile(path.join(publicDir, path.basename(req.path)));
+});
+
+mountMcp(app, pool, { oauthProvider, mcpResourceUrl });
+
 app.use('/api',     authRouter);                       // /api/login, /api/logout, /api/session — public
 app.use('/import',  requireAuth, require('./routes/import'));
 app.use('/api',     requireAuth, require('./routes/api'));
-
-const PORT = process.env.PORT || 3000;
 
 // ---------------------------------------------------------------------------
 // Migrations — run on every startup, idempotent
@@ -244,6 +255,73 @@ async function migrate() {
       created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // ── M8: personal API tokens for MCP (Claude Code static token) ───
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS api_token_hash TEXT`);
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE users ADD CONSTRAINT users_api_token_hash_key UNIQUE (api_token_hash);
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+      WHEN duplicate_table THEN NULL;
+    END $$;
+  `);
+
+  // ── M9: OAuth 2.0 tables for Claude web/Desktop/Cowork connectors ─
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_clients (
+      client_id                  TEXT PRIMARY KEY,
+      client_secret              TEXT,
+      client_secret_expires_at   BIGINT,
+      redirect_uris              JSONB NOT NULL,
+      client_name                TEXT,
+      token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',
+      grant_types                JSONB,
+      response_types             JSONB,
+      scope                      TEXT,
+      client_id_issued_at        BIGINT NOT NULL,
+      created_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_auth_codes (
+      code_hash        TEXT PRIMARY KEY,
+      client_id        TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+      user_id          INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      redirect_uri     TEXT NOT NULL,
+      code_challenge   TEXT NOT NULL,
+      scope            TEXT,
+      resource         TEXT,
+      expires_at       TIMESTAMPTZ NOT NULL,
+      used             BOOLEAN NOT NULL DEFAULT false,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_tokens (
+      token_hash        TEXT PRIMARY KEY,
+      token_type        TEXT NOT NULL CHECK (token_type IN ('access', 'refresh')),
+      client_id         TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+      user_id           INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      scope             TEXT,
+      paired_token_hash TEXT,
+      expires_at        TIMESTAMPTZ,
+      revoked           BOOLEAN NOT NULL DEFAULT false,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_oauth_tokens_user      ON oauth_tokens(user_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_oauth_auth_codes_exp   ON oauth_auth_codes(expires_at)`);
+
+  // ── M10: admin role ──────────────────────────────────────────────
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false`);
+  const { rows: bootstrapped } = await pool.query(`
+    UPDATE users SET is_admin = true
+    WHERE (name = 'Niklas' OR name ILIKE 'Niklas %')
+      AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin)
+    RETURNING name
+  `);
+  if (bootstrapped.length) console.log(`bootstrapped admin: ${bootstrapped.map((u) => u.name).join(', ')}`);
 
   console.log('Migrations OK');
 }

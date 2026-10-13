@@ -28,12 +28,14 @@ function recordFailure(key) {
   }
 }
 
-router.post('/login', async (req, res) => {
+// Shared login logic used by both the /login route and the OAuth authorize
+// handler (lib/oauth.js). Returns { ok: true, user } or { ok: false, error }.
+async function attemptLogin(req) {
   const { name, password } = req.body;
-  if (!name || !password) return res.status(400).json({ error: 'name and password are required' });
+  if (!name || !password) return { ok: false, error: 'name and password are required' };
 
   const key = rateLimitKey(req);
-  if (isLockedOut(key)) return res.status(429).json({ error: 'Too many failed attempts. Try again in 15 minutes.' });
+  if (isLockedOut(key)) return { ok: false, error: 'Too many failed attempts. Try again in 15 minutes.' };
 
   try {
     const { rows } = await pool.query(
@@ -41,28 +43,33 @@ router.post('/login', async (req, res) => {
       [name],
     );
     const user = rows[0];
-
     if (!user || !user.active || !user.password_hash) {
       recordFailure(key);
-      return res.status(401).json({ error: 'Invalid name or password' });
+      return { ok: false, error: 'Invalid name or password' };
     }
-
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
       recordFailure(key);
-      return res.status(401).json({ error: 'Invalid name or password' });
+      return { ok: false, error: 'Invalid name or password' };
     }
-
     failureLog.delete(key);
-    req.session.regenerate((err) => {
-      if (err) { console.error(err); return res.status(500).json({ error: 'Login failed' }); }
-      req.session.userId = user.id;
-      res.json({ id: user.id, name: user.name });
-    });
+    return { ok: true, user };
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Login failed' });
+    return { ok: false, error: 'Login failed' };
   }
+}
+
+router.post('/login', async (req, res) => {
+  const result = await attemptLogin(req);
+  if (!result.ok) {
+    const status = result.error.includes('Too many') ? 429 : 401;
+    return res.status(status).json({ error: result.error });
+  }
+  req.session.regenerate((err) => {
+    if (err) { console.error(err); return res.status(500).json({ error: 'Login failed' }); }
+    req.session.userId = result.user.id;
+    res.json({ id: result.user.id, name: result.user.name });
+  });
 });
 
 router.post('/logout', (req, res) => {
@@ -86,4 +93,4 @@ function requireAuth(req, res, next) {
   next();
 }
 
-module.exports = { router, requireAuth };
+module.exports = { router, requireAuth, attemptLogin };
