@@ -31,6 +31,15 @@ app.use(session({
 const publicDir = process.env.PUBLIC_DIR || path.join(__dirname, '..', 'frontend');
 app.use(express.static(publicDir));
 
+// API key auth — allows MCP / server-to-server access without a session cookie
+function apiKeyAuth(req, _res, next) {
+  if (process.env.API_KEY && req.headers['x-api-key'] === process.env.API_KEY) {
+    req.apiKeyAuth = true;
+  }
+  next();
+}
+
+app.use(apiKeyAuth);
 app.use('/api',     authRouter);                       // /api/login, /api/logout, /api/session — public
 app.use('/import',  requireAuth, require('./routes/import'));
 app.use('/api',     requireAuth, require('./routes/api'));

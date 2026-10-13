@@ -81,6 +81,7 @@ router.get('/session', async (req, res) => {
 });
 
 function requireAuth(req, res, next) {
+  if (req.apiKeyAuth) return next();
   if (!req.session || !req.session.userId) return res.status(401).json({ error: 'Login required' });
   next();
 }

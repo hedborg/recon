@@ -36,6 +36,7 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+      API_KEY: ${API_KEY:-}
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
