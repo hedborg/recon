@@ -4,6 +4,7 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: recon_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: recon
       POSTGRES_USER: recon
@@ -22,6 +23,7 @@ services:
   app:
     build: ./backend
     container_name: recon_app
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
